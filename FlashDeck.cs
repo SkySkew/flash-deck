@@ -23,7 +23,7 @@ class RBtn : Button   // rounded button; optional icon glyph, and "tile" mode wi
     public string Glyph, Sub;
     bool hover, down;
 
-    public RBtn() { FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0; Cursor = Cursors.Hand; SetStyle(ControlStyles.Selectable, false); }
+    public RBtn() { FlatStyle = FlatStyle.Flat; FlatAppearance.BorderSize = 0; Cursor = Cursors.Hand; }   // stays focusable so the keyboard (Tab, Space, Enter) works
 
     static Color Mix(Color c, float a)
     {
@@ -51,7 +51,10 @@ class RBtn : Button   // rounded button; optional icon glyph, and "tile" mode wi
         using (var p = Round(new Rectangle(0, 0, Width - 1, Height - 1), 12))
         using (var b = new SolidBrush(f))
         using (var pen = new Pen(Enabled ? Edge : grey))
-        { g.FillPath(b, p); g.DrawPath(pen, p); }
+        {
+            g.FillPath(b, p); g.DrawPath(pen, p);
+            if (Focused && ShowFocusCues) using (var fp = new Pen(App.Accent, 2f)) g.DrawPath(fp, p);   // keyboard focus ring
+        }
 
         bool ic = Glyph != null && App.IconFont != null;
         int x = 16;
@@ -242,7 +245,7 @@ class App : Form
     static readonly string RomDir = Path.Combine(Root, "Rom");
     static readonly string Adb = Path.Combine(Pt, "adb.exe");
     static readonly string Fb = Path.Combine(Pt, "fastboot.exe");
-    const string Cap = "Flash Deck";
+    const string Cap = "Flash Deck", Version = "1.0.0";
     const int PgGuide = 0, PgTools = 1, PgCheck = 2, PgUnlock = 3, PgLog = 4;
     static int StartPage = 0;
 
@@ -293,7 +296,7 @@ class App : Form
         side.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 1, BackColor = Border });   // thin divider
         side.Controls.Add(new Logo { Left = 16, Top = 18 });
         side.Controls.Add(new Label { Text = Cap, Left = 64, Top = 18, AutoSize = true, ForeColor = SideTitle, Font = new Font("Segoe UI", 12.5f, FontStyle.Bold) });
-        side.Controls.Add(new Label { Text = "adb · fastboot", Left = 66, Top = 42, AutoSize = true, ForeColor = SideMuted, Font = new Font("Segoe UI", 8.5f) });
+        side.Controls.Add(new Label { Text = "adb · fastboot · v" + Version, Left = 66, Top = 42, AutoSize = true, ForeColor = SideMuted, Font = new Font("Segoe UI", 8.5f) });
         navWiz = NavBtn(T("ROM Guide", "Panduan ROM"), "", 100, PgGuide);
         navTool = NavBtn(T("Tools", "Alat"), "", 148, PgTools);
         navCheck = NavBtn(T("Pre-flight check", "Semakan pra-flash"), "", 196, PgCheck);
@@ -401,12 +404,12 @@ class App : Form
         var r1 = ToolCard(toolPage, T("Modes & reboot", "Mod & reboot"));
         Tile(r1, T("Reboot to Bootloader", "Reboot ke Bootloader"), T("Enter fastboot mode", "Masuk mod fastboot"), "", () => Reboot("bootloader"), false);
         Tile(r1, T("Reboot to Recovery", "Reboot ke Recovery"), T("Open the recovery menu", "Buka menu recovery"), "", () => Reboot("recovery"), false);
-        Tile(r1, T("Reboot to System", "Reboot ke Sistem"), T("Start Android normally", "Mulakan Android seperti biasa"), "", () => Reboot(""), false);
+        Tile(r1, T("Reboot to System", "Reboot ke Sistem"), T("Start Android normally", "Mulakan Android"), "", () => Reboot(""), false);
         var r2 = ToolCard(toolPage, T("Files", "Fail"));
         Tile(r2, T("Flash .img file", "Flash fail .img"), T("Write an image to a partition", "Tulis imej ke partition"), "", FlashImg, false);
         Tile(r2, T("Sideload .zip file", "Sideload fail .zip"), T("Install a ROM or add-on", "Pasang ROM atau add-on"), "", () => SideloadAuto(null), false);
         Tile(r2, T("Check file MD5", "Semak MD5 fail"), T("Verify a downloaded file", "Semak fail yang dimuat turun"), "", Md5, false);
-        Tile(r2, T("Flash several images", "Flash beberapa imej"), T("In order, stops on error", "Mengikut urutan, berhenti jika ralat"), "", FlashMany, false);
+        Tile(r2, T("Flash several images", "Flash beberapa imej"), T("In order, stops on error", "Ikut urutan, henti ralat"), "", FlashMany, false);
         var r6 = ToolCard(toolPage, T("Phone tools (phone on, USB debugging)", "Alat telefon (telefon hidup, USB debugging)"));
         Tile(r6, T("Install APK", "Pasang APK"), T("Install an app from the PC", "Pasang app dari PC"), "", InstallApk, false);
         Tile(r6, T("Screenshot", "Tangkapan skrin"), T("Saved in Pictures", "Disimpan dalam Pictures"), "", Screenshot, false);
@@ -445,7 +448,7 @@ class App : Form
         Note(tr, T("3. Set the USB mode to File transfer.", "3. Tetapkan mod USB kepada File transfer."));
         Note(tr, T("4. Install the USB driver (Xiaomi: Mi USB driver; others: Google USB driver).", "4. Pasang pemacu USB (Xiaomi: Mi USB driver; lain-lain: Google USB driver)."));
         var trRow = ToolRow(tr); trRow.Margin = new Padding(0, 8, 0, 0);
-        Tile(trRow, T("Restart ADB server", "Mula semula pelayan ADB"), T("Fixes stuck detection", "Betulkan pengesanan tersekat"), "", RestartAdb, false);
+        Tile(trRow, T("Restart ADB server", "Mulakan semula ADB"), T("Fixes stuck detection", "Betulkan pengesanan tersekat"), "", RestartAdb, false);
         Tile(trRow, T("Open Device Manager", "Buka Device Manager"), T("Look for a warning icon", "Cari ikon amaran"), "", () => { try { Process.Start("devmgmt.msc"); } catch (Exception) { } }, false);
 
         BuildUnlock();
@@ -454,7 +457,7 @@ class App : Form
         var timer = new System.Windows.Forms.Timer { Interval = 3000 };
         timer.Tick += (s, e) => Poll();
         timer.Start();
-        Shown += (s, e) => { CleanLogs(); Log("Flash Deck started"); RefreshHints(); Poll(); };
+        Shown += (s, e) => { CleanLogs(); Log("Flash Deck v" + Version + " started"); RefreshHints(); Poll(); };
     }
 
     void SwitchSetting(string file, string value)
@@ -868,7 +871,7 @@ class App : Form
             T("On the PC, download the official Mi Unlock app (button below) and run the USB driver that comes with it.", "Pada PC, muat turun Mi Unlock app rasmi (butang di bawah) dan jalankan pemacu USB yang disertakan."),
             T("Put the phone in Fastboot (switch off, hold Volume Down + Power), connect USB, then run Mi Unlock and sign in with the same Mi account.", "Letak telefon dalam Fastboot (matikan, tahan Volume Down + Power), sambung USB, kemudian jalankan Mi Unlock dan log masuk dengan akaun Mi yang sama."),
             T("Follow the app. It may ask you to wait up to 30 days; try again after the time it shows. One account can only unlock a few phones per year.", "Ikut app itu. Ia mungkin minta tunggu sehingga 30 hari; cuba lagi selepas masa yang ditunjukkan. Satu akaun hanya boleh unlock beberapa telefon setahun."),
-            T("The phone is erased and restarts. Turn USB debugging back on, then open the Pre-flight check tab.", "Telefon dipadam dan dimulakan semula. Hidupkan semula USB debugging, kemudian buka tab Pre-flight check.") };
+            T("The phone is erased and restarts. Turn USB debugging back on, then open the Pre-flight check tab.", "Telefon dipadam dan dimulakan semula. Hidupkan semula USB debugging, kemudian buka tab Semakan pra-flash.") };
         else if (samsung) steps = new[] {
             T("Samsung uses Odin and Download mode, not fastboot, so Flash Deck cannot unlock it.", "Samsung guna Odin dan mod Download, bukan fastboot, jadi Flash Deck tak boleh unlock-nya."),
             T("On the phone: Developer options > OEM unlocking ON, then follow a guide made for your exact Samsung model.", "Pada telefon: Developer options > OEM unlocking ON, kemudian ikut panduan untuk model Samsung awak.") };
@@ -876,13 +879,13 @@ class App : Form
             T("Turn on Developer options, then 'OEM unlocking' and 'USB debugging'.", "Hidupkan Developer options, kemudian 'OEM unlocking' dan 'USB debugging'."),
             T("Get your unlock data from the manufacturer (the button below searches for their official page) and request an unlock code.", "Dapatkan data unlock daripada pengilang (butang di bawah mencari halaman rasmi mereka) dan minta kod unlock."),
             T("Press 'Reboot to Bootloader', then 'Unlock bootloader' and enter the code when asked.", "Tekan 'Reboot ke Bootloader', kemudian 'Unlock bootloader' dan masukkan kod bila diminta."),
-            T("The phone is erased and restarts. Turn USB debugging back on, then open the Pre-flight check tab.", "Telefon dipadam dan dimulakan semula. Hidupkan semula USB debugging, kemudian buka tab Pre-flight check.") };
+            T("The phone is erased and restarts. Turn USB debugging back on, then open the Pre-flight check tab.", "Telefon dipadam dan dimulakan semula. Hidupkan semula USB debugging, kemudian buka tab Semakan pra-flash.") };
         else steps = new[] {
             T("Turn on Developer options (tap the build number 7 times).", "Hidupkan Developer options (tekan build number 7 kali)."),
             T("In Developer options turn ON 'OEM unlocking' (some phones need internet; it can be greyed out on carrier-locked phones) and 'USB debugging'.", "Dalam Developer options hidupkan 'OEM unlocking' (sesetengah telefon perlu internet; ia boleh kelabu pada telefon terkunci pengendali) dan 'USB debugging'."),
             T("Connect USB, tap Allow on the phone, then press 'Reboot to Bootloader' below.", "Sambung USB, tekan Allow pada telefon, kemudian tekan 'Reboot ke Bootloader' di bawah."),
             T("When the top card says Fastboot mode, press 'Unlock bootloader' and confirm on the phone with the volume and power keys.", "Bila kad atas tunjuk Mod Fastboot, tekan 'Unlock bootloader' dan sahkan pada telefon dengan butang volume dan kuasa."),
-            T("The phone is erased and restarts. Turn USB debugging back on, then open the Pre-flight check tab.", "Telefon dipadam dan dimulakan semula. Hidupkan semula USB debugging, kemudian buka tab Pre-flight check.") };
+            T("The phone is erased and restarts. Turn USB debugging back on, then open the Pre-flight check tab.", "Telefon dipadam dan dimulakan semula. Hidupkan semula USB debugging, kemudian buka tab Semakan pra-flash.") };
         for (int i = 0; i < steps.Length; i++) Note(card, (i + 1) + ".  " + steps[i]);
         if (xiaomi) Note(card, T("Flash Deck's own 'Unlock bootloader' button usually fails on Xiaomi, so use the Mi Unlock app.", "Butang 'Unlock bootloader' Flash Deck biasanya gagal pada Xiaomi, jadi guna Mi Unlock app."));
         if (samsung) return;
@@ -924,6 +927,22 @@ class App : Form
     // ---------- actions ----------
     void NoPhone() { MessageBox.Show(T("No phone detected.", "Tiada telefon dikesan."), Cap); }
 
+    // partition names go straight into a fastboot command line, so allow only letters, digits and underscore
+    bool ValidPart(string part)
+    {
+        if (Regex.IsMatch(part, "^[A-Za-z0-9_]+$")) return true;
+        MessageBox.Show(T("A partition name may only contain letters, digits and underscore.", "Nama partition hanya boleh mengandungi huruf, nombor dan garis bawah."), Cap);
+        return false;
+    }
+
+    // closing mid-flash can leave a multi-step flash half done
+    protected override void OnFormClosing(FormClosingEventArgs e)
+    {
+        if (busy && MessageBox.Show(T("A task is still running. Closing now can leave the phone half-flashed. Close anyway?", "Tugasan masih berjalan. Menutup sekarang boleh membuat telefon separuh di-flash. Tutup juga?"), Cap, MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes)
+            e.Cancel = true;
+        base.OnFormClosing(e);
+    }
+
     void Reboot(string target)
     {
         if (state == "none") { NoPhone(); return; }
@@ -942,7 +961,7 @@ class App : Form
             string.Format(T("Partition name (suggested for {0}: {1}; modern A/B devices may need boot or vendor_boot - follow the ROM instructions):",
                             "Nama partition (cadangan untuk {0}: {1}; peranti A/B moden mungkin boot atau vendor_boot - ikut arahan ROM):"), Prof().Name, Prof().Part),
             "Flash recovery", Prof().Part);
-        if (part == "") return;
+        if (part == "" || !ValidPart(part)) return;
         Run("Flash recovery (" + part + "): " + Path.GetFileName(f), () => Exec(Fb, "flash " + part + " \"" + f + "\"", null, true));
     }
 
@@ -960,7 +979,7 @@ class App : Form
         string f = Pick("Image (*.img)|*.img");
         if (f == null) return;
         string part = Interaction.InputBox(T("Partition name (follow the ROM instructions; usually boot or recovery):", "Nama partition (ikut arahan ROM; biasa: boot atau recovery):"), "Flash", "boot");
-        if (part == "") return;
+        if (part == "" || !ValidPart(part)) return;
         Run("Flash " + part, () => Exec(Fb, "flash " + part + " \"" + f + "\"", null, true));
     }
 
@@ -1075,7 +1094,7 @@ class App : Form
     {
         if (!NeedSystem()) return;
         string src = Interaction.InputBox(T("Path on the phone (e.g. /sdcard/Download/file.zip):", "Laluan pada telefon (cth. /sdcard/Download/file.zip):"), T("Copy file from phone", "Salin fail dari telefon"), "/sdcard/Download/");
-        if (src == "") return;
+        if (src == "" || src.Contains("\"")) return;
         var d = new FolderBrowserDialog { Description = T("Save to folder", "Simpan ke folder") };
         if (d.ShowDialog() != DialogResult.OK) return;
         string dest = d.SelectedPath.TrimEnd('\\');
@@ -1147,6 +1166,7 @@ class App : Form
         if (!File.Exists(Path.Combine(d.SelectedPath, bat))) { MessageBox.Show(bat + T(" not found in that folder.", " tak jumpa dalam folder itu."), Cap); return; }
         if (!NeedFastboot()) return;
         if (word != null && !Confirm(word, T("All data on the phone will be erased.", "Semua data telefon akan dipadam."))) return;
+        if (word == null && MessageBox.Show(string.Format(T("This will run {0} from:\n{1}\n\nOnly continue if you trust this folder.", "Ini akan menjalankan {0} dari:\n{1}\n\nTeruskan hanya jika awak percayai folder ini."), bat, d.SelectedPath), Cap, MessageBoxButtons.YesNo) != DialogResult.Yes) return;
         Run("Fastboot ROM: " + bat, () => Exec("cmd.exe", "/c " + bat, d.SelectedPath, true));
     }
 
@@ -1162,7 +1182,11 @@ class App : Form
         if (p.Unlock == null) { MessageBox.Show(p.Note, p.Name); return; }
         if (!NeedFastboot() || !Confirm("UNLOCK", T("Unlocking erases all data.", "Unlock memadam semua data.") + "\n\n" + p.Note)) return;
         string code = p.Code ? Interaction.InputBox(T("Enter the unlock code from the manufacturer's website:", "Masukkan kod unlock dari laman pengilang:"), T("Unlock code", "Kod unlock"), "") : "";
-        if (p.Code && code == "") return;
+        if (p.Code && (code == "" || !Regex.IsMatch(code, "^[A-Za-z0-9]+$")))
+        {
+            if (code != "") MessageBox.Show(T("The code may only contain letters and digits.", "Kod hanya boleh mengandungi huruf dan nombor."), Cap);
+            return;
+        }
         string c1 = p.Unlock + (p.Code ? " " + code : "");
         Run("Unlock bootloader (" + p.Unlock + ")", () => TryBoth(c1, p.Alt));
     }
