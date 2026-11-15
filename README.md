@@ -1,0 +1,47 @@
+# Flash Deck
+
+A small Windows app that wraps Google's **adb** and **fastboot** so you can unlock a bootloader, install a custom ROM (LineageOS and others), go back to stock, and use a few handy phone tools, without typing commands.
+
+Written in C# (WinForms), built with the compiler that ships with Windows. No installer, no dependencies.
+
+> **Warning:** unlocking the bootloader and flashing **erase all data** and can void the warranty. Back up first. Do **not** lock the bootloader while a custom ROM is installed, it can brick the phone. Use at your own risk.
+
+## Features
+
+- **ROM Guide**: numbered steps (recovery, format data, install ROM, GApps) with the current step highlighted from the phone's state. ROM choices: LineageOS, RisingOS, AlphaDroid, or any other zip.
+- **Pre-flight check**: phone detected, battery, bootloader state, files in `Rom\`, valid zips, and ROM codename vs phone codename.
+- **Unlock guide**: steps per brand (Xiaomi/Mi Unlock, Pixel/OnePlus/Nothing `flashing unlock`, Motorola/Sony unlock code), plus a status check.
+- **Tools**: reboot modes, flash `.img` (one or several, in order), sideload `.zip`, MD5 check, stock Xiaomi fastboot ROM (keep data / wipe), phone tools (install APK, screenshot, copy files to/from the phone, battery info, backup photos and downloads), download pages.
+- Auto-detects the phone brand and codename, remembers the last phone, logs every session to `logs\`.
+- English (default) and Bahasa Melayu, light and dark themes.
+
+## Quick start
+
+1. Download **platform-tools** for Windows from <https://developer.android.com/tools/releases/platform-tools> and extract it so a `platform-tools` folder sits next to `Flash Deck.exe`.
+2. Put `recovery.img`, the ROM zip and (optionally) a GApps zip in a `Rom` folder next to the app.
+3. On the phone enable Developer options and **USB debugging**, connect USB, tap **Allow**.
+4. Run the **Pre-flight check** tab, then follow the **ROM Guide**.
+
+```
+Flash Deck.exe
+platform-tools\   (Google's adb + fastboot, not included)
+Rom\              (recovery.img, ROM zip, GApps zip)
+logs\             (created automatically)
+```
+
+## Build
+
+```
+build.bat      builds "Flash Deck.exe" (needs only Windows' built-in C# compiler)
+package.bat    builds and zips to dist\FlashDeck-portable.zip
+```
+
+`Flash Deck.exe --page=N` opens a specific page (0 guide, 1 tools, 2 check, 3 unlock, 4 log).
+
+## Notes and limits
+
+- Commands for brands other than Xiaomi are best-effort; check the manufacturer's guide.
+- Samsung uses Odin / Download mode, not fastboot: only reboot and sideload work.
+- The app is unsigned, so Windows SmartScreen or antivirus may warn about it. Build it yourself from the source if in doubt.
+- Tested with a Xiaomi Mi 10T (M2007J3SY) running LineageOS. Other phones are untested.
+- No license has been chosen yet.

@@ -1,0 +1,14 @@
+# Google's platform-tools (download it yourself, see README)
+platform-tools/
+# ROM files, logs and build output
+Rom/
+logs/
+dist/
+*.exe
+*.zip
+*.img
+# per-user settings written by the app
+lang.txt
+theme.txt
+rom.txt
+last-device.txt
