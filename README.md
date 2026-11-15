@@ -44,4 +44,4 @@ package.bat    builds and zips to dist\FlashDeck-portable.zip
 - Samsung uses Odin / Download mode, not fastboot: only reboot and sideload work.
 - The app is unsigned, so Windows SmartScreen or antivirus may warn about it. Build it yourself from the source if in doubt.
 - Tested with a Xiaomi Mi 10T (M2007J3SY) running LineageOS. Other phones are untested.
-- No license has been chosen yet.
+- Released under the MIT License (see `LICENSE`). Google's `platform-tools` is not included and has its own license.
