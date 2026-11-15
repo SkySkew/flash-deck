@@ -1,6 +1,6 @@
 // Flash Deck - GUI for adb/fastboot. Build with build.bat (C# 5, no install needed).
 // Language (English default / Bahasa Melayu) and theme (light / dark) are saved in lang.txt / theme.txt.
-// Dev switch: start with --page=N (0 guide, 1 tools, 2 check, 3 unlock, 4 log) to open a specific page.
+// Dev switch: start with --page=N (0 guide, 1 tools, 2 check, 3 unlock, 4 apps, 5 log) to open a specific page.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -282,17 +282,21 @@ class App : Form
     static readonly string RomDir = Path.Combine(Root, "Rom");
     static readonly string Adb = Path.Combine(Pt, "adb.exe");
     static readonly string Fb = Path.Combine(Pt, "fastboot.exe");
-    public const string Cap = "Flash Deck", Version = "1.0.1";
+    public const string Cap = "Flash Deck", Version = "1.1.0";
     static Size WorkArea;   // usable screen size; --wa=WxH overrides it for testing small screens
-    const int PgGuide = 0, PgTools = 1, PgCheck = 2, PgUnlock = 3, PgLog = 4;
+    const int PgGuide = 0, PgTools = 1, PgCheck = 2, PgUnlock = 3, PgApps = 4, PgLog = 5;
     static int StartPage = 0;
+    static bool DemoApps, AutoLoad, GuideOpen;   // dev switches: --demo-apps (sample list), --autoload (load the real list once the phone is found)
+    static int AutoFilter = -1;       // --filter=N picks the list type (0 user, 1 system, 2 all, 3 disabled)
 
     Label statusIcon, status, info, hint, hRec, hBoot, hRom, hGapps;
     TextBox log;
     ProgressBar prog;
-    FlowLayoutPanel wizPage, toolPage, checkPage, checkList, unlockPage;   // content flows
-    Panel wizScroll, toolScroll, checkScroll, unlockScroll, logPage;       // scrolling containers around them
-    RBtn navWiz, navTool, navCheck, navUnlock, navLog;
+    FlowLayoutPanel wizPage, toolPage, checkPage, checkList, unlockPage, appsPage;   // content flows
+    Panel wizScroll, toolScroll, checkScroll, unlockScroll, appsScroll, logPage;     // scrolling containers around them
+    RBtn navWiz, navTool, navCheck, navUnlock, navApps, navLog;
+    ListView appList; ComboBox appFilter; TextBox appSearch; Label appCount; CheckBox appHideBg;   // Apps page (remove bloatware)
+    List<string> appAll = new List<string>();
     CheckBox follow;
     ComboBox brand;   // index into Profiles
     Label brandNote, romNote;
@@ -313,7 +317,11 @@ class App : Form
         WorkArea = Screen.PrimaryScreen.WorkingArea.Size;
         foreach (var a in args)
         {
-            if (a.StartsWith("--page=")) int.TryParse(a.Substring(7), out StartPage);
+            if (a == "--demo-apps") DemoApps = true;
+            else if (a == "--autoload") AutoLoad = true;
+            else if (a == "--guide-open") GuideOpen = true;
+            else if (a.StartsWith("--filter=")) int.TryParse(a.Substring(9), out AutoFilter);
+            else if (a.StartsWith("--page=")) int.TryParse(a.Substring(7), out StartPage);
             else if (a.StartsWith("--wa="))
             {
                 var wh = a.Substring(5).Split('x'); int w, h;
@@ -324,6 +332,7 @@ class App : Form
         // first run: until adb and fastboot are next to the app, show the setup window (Check again = Retry)
         while (!File.Exists(Adb) || !File.Exists(Fb))
             if (new SetupForm().ShowDialog() != DialogResult.Retry) return;
+        if (Array.IndexOf(args, "--phonetest") >= 0) { new App().PhoneSelfTest(); return; }
         Application.Run(new App());
     }
 
@@ -341,6 +350,28 @@ class App : Form
         chk("brand unknown falls back to Other", ProfileIndex("Acme") == Profiles.Length - 1);
         chk("samsung has no unlock command", Profiles[ProfileIndex("samsung")].Unlock == null);
         chk("lock commands derive from unlock", Profiles[0].Lock == "oem lock" && Profiles[1].LockAlt == "oem lock");
+        chk("settings app is protected", IsProtected("com.android.settings"));
+        chk("providers prefix is protected", IsProtected("com.android.providers.contacts"));
+        chk("a normal app is not protected", !IsProtected("org.fdroid.fdroid"));
+        chk("package name accepted", PkgName.IsMatch("org.fdroid.fdroid"));
+        chk("package name rejects extra command", !PkgName.IsMatch("a.b; reboot") && !PkgName.IsMatch("a b") && !PkgName.IsMatch(""));
+        HomePkgs = new HashSet<string> { "com.vendor.launcher" };
+        chk("the home screen app is protected on any brand", IsProtected("com.vendor.launcher") && AppKind("com.vendor.launcher") == "core");
+        HomePkgs = new HashSet<string>();
+        UserPkgs = new HashSet<string> { "com.example.mine" }; LauncherPkgs = new HashSet<string> { "com.example.sysicon" };
+        UserPkgs.Add("com.google.android.safetycore"); UserPkgs.Add("com.brave.browser");
+        chk("advice: app you installed", AppKind("com.example.mine") == "yours" && AppKind("com.brave.browser") == "yours");
+        chk("advice: a Google part installed with GApps is not 'yours'", AppKind("com.google.android.safetycore") == "gapps");
+        chk("advice: unlisted system app with an icon", AppKind("com.example.sysicon") == "sysicon");
+        chk("advice: unlisted background part", AppKind("com.example.bg") == "sysbg");
+        chk("advice: a hint wins over 'yours'", AppKind("com.android.vending") == "careful");
+        LauncherPkgs = new HashSet<string>(); UserPkgs = new HashSet<string>();
+        chk("advice: no extra information -> unknown", AppKind("com.example.bg") == "unknown");
+        chk("advice: ads app is safe", AppKind("com.miui.analytics") == "safe");
+        chk("advice: protected beats any hint", AppKind("com.android.settings") == "core");
+        chk("advice: unlisted app is unknown", AppKind("com.example.whatever") == "unknown");
+        chk("advice: careful app", AppKind("com.android.vending") == "careful");
+        chk("list row has 3 columns", MakeAppItem("com.miui.analytics").SubItems.Count == 3);
         File.WriteAllText(Path.Combine(Root, "selftest.txt"), r.ToString());
     }
 
@@ -362,8 +393,9 @@ class App : Form
         navTool = NavBtn(T("Tools", "Alat"), "", 148, PgTools);
         navCheck = NavBtn(T("Pre-flight check", "Semakan pra-flash"), "", 196, PgCheck);
         navUnlock = NavBtn(T("Unlock guide", "Panduan unlock"), "", 244, PgUnlock);
-        navLog = NavBtn("Log", "", 292, PgLog);
-        side.Controls.AddRange(new Control[] { navWiz, navTool, navCheck, navUnlock, navLog });
+        navApps = NavBtn(T("Apps (beta)", "Aplikasi (beta)"), "", 292, PgApps);
+        navLog = NavBtn("Log", "", 340, PgLog);
+        side.Controls.AddRange(new Control[] { navWiz, navTool, navCheck, navUnlock, navApps, navLog });
         follow = new CheckBox { Text = T("Auto-follow phone", "Ikut telefon auto"), Checked = true, AutoSize = true, Left = 16, ForeColor = SideText, BackColor = SideBg };
         var themeBtn = new RBtn { Text = Dark ? T("Light mode", "Mod cerah") : T("Dark mode", "Mod gelap"), Glyph = Dark ? "" : "", Left = 12, Width = 176, Height = 40, LeftText = true, Shift = SideShift, Fill = SideBg, Edge = SideEdge, Fore = SideText, GlyphColor = SideMuted };
         themeBtn.Click += (s, e) => SwitchSetting(ThemeFile, Dark ? "light" : "dark");
@@ -405,9 +437,9 @@ class App : Form
         statusCard.Controls.Add(brandLbl); statusCard.Controls.Add(brand); statusCard.Controls.Add(brandNote);
         statusCard.Resize += (s, e) => { brand.Left = statusCard.Width - 260; brandLbl.Left = brand.Left + 2; }; // always on the right
 
-        wizPage = NewPage(out wizScroll); toolPage = NewPage(out toolScroll); checkPage = NewPage(out checkScroll); unlockPage = NewPage(out unlockScroll);
+        wizPage = NewPage(out wizScroll); toolPage = NewPage(out toolScroll); checkPage = NewPage(out checkScroll); unlockPage = NewPage(out unlockScroll); appsPage = NewPage(out appsScroll);
         var pages = new Panel { Dock = DockStyle.Fill, BackColor = PageBg };
-        pages.Controls.Add(wizScroll); pages.Controls.Add(toolScroll); pages.Controls.Add(checkScroll); pages.Controls.Add(unlockScroll);
+        pages.Controls.Add(wizScroll); pages.Controls.Add(toolScroll); pages.Controls.Add(checkScroll); pages.Controls.Add(unlockScroll); pages.Controls.Add(appsScroll);
 
         logPage = new Panel { Dock = DockStyle.Fill, BackColor = PageBg, Visible = false };
         var logBar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 42, BackColor = PageBg };
@@ -512,13 +544,81 @@ class App : Form
         Tile(trRow, T("Restart ADB server", "Mulakan semula ADB"), T("Fixes stuck detection", "Betulkan pengesanan tersekat"), "", RestartAdb, false);
         Tile(trRow, T("Open Device Manager", "Buka Device Manager"), T("Look for a warning icon", "Cari ikon amaran"), "", () => { try { Process.Start("devmgmt.msc"); } catch (Exception) { } }, false);
 
+        // --- Apps page: list the phone's apps and remove the ones you do not want ---
+        var ap = NewCard(appsPage, T("Remove apps (bloatware) - beta", "Buang aplikasi (bloatware) - beta"), 0);
+        Note(ap, T("Hide the apps you do not use. Nothing is deleted, and you can undo it.", "Sembunyikan aplikasi yang tak digunakan. Tiada apa dipadam, dan boleh dibatalkan."));
+        // the how-to is collapsed behind a button so the page starts compact
+        var guide = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, Visible = GuideOpen, Margin = new Padding(0, 0, 0, 4) };
+        var guideBtn = new RBtn { Text = T("How to use", "Cara guna"), Glyph = GuideOpen ? "" : "", Width = 160, Height = 32, Font = Font, GlyphColor = Accent, Margin = new Padding(0, 6, 0, 2) };
+        guideBtn.Click += (s, e) => { guide.Visible = !guide.Visible; guideBtn.Glyph = guide.Visible ? "" : ""; guideBtn.Invalidate(); };
+        ap.Controls.Add(guideBtn); ap.Controls.Add(guide);
+        var steps = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(655, 0), Margin = new Padding(0, 6, 0, 2) };
+        Action<int, string> stepOf = (n, txt) =>
+        {
+            var bd = new Badge(n); bd.Margin = new Padding(0, 0, 6, 0); steps.Controls.Add(bd);
+            steps.Controls.Add(new Label { Text = txt, AutoSize = true, ForeColor = Ink, UseMnemonic = false, Margin = new Padding(0, 4, 22, 0) });
+        };
+        stepOf(1, T("Load apps", "Muat aplikasi"));
+        stepOf(2, T("Tick the ones you do not need", "Tandakan yang tak perlu"));
+        stepOf(3, T("Press Disable", "Tekan Lumpuhkan"));
+        guide.Controls.Add(steps);
+        Note(guide, T("Changed your mind? Choose 'Disabled apps' in the list, tick the app and press Enable. 'Remove' uninstalls instead: it works for apps you installed yourself, but system apps usually need root. Not sure what an app is? Click it and press Search online. Change one or two at a time, restart the phone, and check that everything still works. The colours are general advice, not a guarantee.",
+                   "Berubah fikiran? Pilih 'Aplikasi dilumpuhkan' dalam senarai, tandakan aplikasi dan tekan Hidupkan. 'Buang' menyahpasang: ia berfungsi untuk aplikasi yang awak pasang sendiri, tetapi aplikasi sistem biasanya perlu root. Tak pasti apa aplikasi itu? Klik dan tekan Cari maklumat. Ubah satu atau dua sahaja, mulakan semula telefon, dan semak semuanya masih berfungsi. Warna ialah nasihat umum, bukan jaminan."));
+        var apBar = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 8, 0, 6) };
+        appFilter = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 170, Margin = new Padding(0, 6, 8, 0) };
+        appFilter.Items.AddRange(new object[] { T("User apps", "Aplikasi pengguna"), T("System apps", "Aplikasi sistem"), T("All apps", "Semua aplikasi"), T("Disabled apps", "Aplikasi dilumpuhkan") });
+        appFilter.SelectedIndex = AutoFilter >= 0 && AutoFilter < appFilter.Items.Count ? AutoFilter : 0;
+        appSearch = new TextBox { Width = 200, Margin = new Padding(8, 8, 8, 0) };
+        if (Dark) { appFilter.FlatStyle = FlatStyle.Flat; appFilter.BackColor = CardBg; appFilter.ForeColor = Ink; appSearch.BackColor = CardBg; appSearch.ForeColor = Ink; }
+        appSearch.TextChanged += (s, e) => FillApps();
+        apBar.Controls.Add(appFilter);
+        apBar.Controls.Add(Btn(T("Load apps", "Muat aplikasi"), "", LoadApps, 1, 160));
+        apBar.Controls.Add(new Label { Text = T("Filter:", "Tapis:"), AutoSize = true, ForeColor = Muted, Margin = new Padding(8, 11, 0, 0) });
+        apBar.Controls.Add(appSearch);
+        ap.Controls.Add(apBar);
+        appHideBg = new CheckBox { Text = T("Hide background parts (recommended)", "Sembunyi bahagian latar (disyorkan)"), Checked = true, AutoSize = true, ForeColor = Ink, Margin = new Padding(0, 0, 0, 6) };
+        appHideBg.CheckedChanged += (s, e) => FillApps();
+        ap.Controls.Add(appHideBg);
+        appList = new ListView { View = View.Details, CheckBoxes = true, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.Nonclickable, Width = 655, Height = 240, BorderStyle = BorderStyle.FixedSingle, BackColor = CardBg, ForeColor = Ink, Margin = new Padding(0, 0, 0, 6) };
+        appList.Columns.Add(T("Package", "Pakej"), 280); appList.Columns.Add(T("What it is", "Apa ia"), 170); appList.Columns.Add(T("Advice", "Nasihat"), 180);
+        ap.Controls.Add(appList);
+        var legend = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(655, 0), Margin = new Padding(0, 0, 0, 4) };
+        Action<Color, string> key = (col, txt) => legend.Controls.Add(new Label { Text = "● " + txt, AutoSize = true, ForeColor = col, UseMnemonic = false, Margin = new Padding(0, 0, 14, 0) });
+        key(Color.SeaGreen, T("Safe to disable", "Selamat dilumpuhkan")); key(Color.SteelBlue, T("Optional app", "Aplikasi pilihan")); key(Color.DarkOrange, T("Careful", "Hati-hati"));
+        key(Color.Firebrick, T("Core (protected)", "Teras (dilindungi)")); key(Color.SlateBlue, T("Installed by you", "Dipasang oleh awak"));
+        key(Muted, T("Unknown, has an icon", "Tak diketahui, ada ikon")); key(Color.Sienna, T("Background part: leave it", "Bahagian latar: biarkan"));
+        ap.Controls.Add(legend);
+        appCount = new Label { Text = T("Press 'Load apps' (the phone must be on, USB debugging allowed).", "Tekan 'Muat aplikasi' (telefon mesti hidup, USB debugging dibenarkan)."), AutoSize = true, ForeColor = Muted, Margin = new Padding(0, 0, 0, 8) };
+        ap.Controls.Add(appCount);
+        var apRow = ToolRow(ap);
+        apRow.Controls.Add(Btn(T("Disable ticked apps", "Lumpuhkan yang ditanda"), "", () => DisableApps(false), 1, 210));
+        apRow.Controls.Add(Btn(T("Enable ticked apps", "Hidupkan yang ditanda"), "", () => DisableApps(true), 0, 210));
+        apRow.Controls.Add(Btn(T("Search online", "Cari maklumat"), "", SearchApp, 0, 210));
+        apRow.Controls.Add(Btn(T("Remove ticked apps", "Buang aplikasi ditanda"), "", UninstallApps, 2, 210));
+        apRow.Controls.Add(Btn(T("Restore by name", "Pulihkan ikut nama"), "", RestoreApp, 0, 210));
+
+        if (DemoApps)   // --demo-apps: fill the list with sample packages so the layout can be checked without a phone
+        {
+            appAll = new List<string> { "android.autoinstalls.config.Xiaomi.qssi", "com.android.settings", "com.android.vending", "com.facebook.appmanager", "com.google.android.apps.youtube.music", "com.google.android.youtube", "com.miui.analytics", "com.miui.msa.global", "com.example.something.unknown", "org.lineageos.recorder", "com.brave.browser", "com.android.dialer", "com.google.ar.core" };
+            UserPkgs = new HashSet<string> { "com.brave.browser" }; LauncherPkgs = new HashSet<string> { "com.android.dialer" };
+            FillApps();
+        }
         BuildUnlock();
         Nav(StartPage);
         ShowState("none", "");
         var timer = new System.Windows.Forms.Timer { Interval = 3000 };
         timer.Tick += (s, e) => Poll();
         timer.Start();
-        Shown += (s, e) => { CleanLogs(); Log("Flash Deck v" + Version + " started"); RefreshHints(); Poll(); };
+        Shown += (s, e) =>
+        {
+            CleanLogs(); Log("Flash Deck v" + Version + " started"); RefreshHints(); Poll();
+            if (AutoLoad)   // wait for the first poll to find the phone, then load the list
+            {
+                var al = new System.Windows.Forms.Timer { Interval = 6000 };
+                al.Tick += (s2, e2) => { al.Stop(); LoadApps(); };
+                al.Start();
+            }
+        };
     }
 
     void SwitchSetting(string file, string value)
@@ -548,9 +648,9 @@ class App : Form
     void Nav(int i)
     {
         curPage = i;
-        wizScroll.Visible = i == PgGuide; toolScroll.Visible = i == PgTools; checkScroll.Visible = i == PgCheck; unlockScroll.Visible = i == PgUnlock; logPage.Visible = i == PgLog;
+        wizScroll.Visible = i == PgGuide; toolScroll.Visible = i == PgTools; checkScroll.Visible = i == PgCheck; unlockScroll.Visible = i == PgUnlock; appsScroll.Visible = i == PgApps; logPage.Visible = i == PgLog;
         wizScroll.AutoScrollPosition = new Point(0, 0); toolScroll.AutoScrollPosition = new Point(0, 0); checkScroll.AutoScrollPosition = new Point(0, 0);
-        var navs = new[] { navWiz, navTool, navCheck, navUnlock, navLog };
+        var navs = new[] { navWiz, navTool, navCheck, navUnlock, navApps, navLog };
         for (int k = 0; k < navs.Length; k++)
         {
             bool on = k == i;
@@ -926,6 +1026,297 @@ class App : Form
         if (romSel.SelectedIndex == 0 && av.Success && av.Groups[1].Value != "12")
             add(1, string.Format(T("LineageOS needs the Android 12 stock firmware before a fresh install (the phone is on Android {0} now).", "LineageOS perlukan firmware stok Android 12 sebelum pemasangan baharu (telefon kini Android {0})."), av.Groups[1].Value));
         if (st == "device" && mfr != "") add(1, T("Back up your data first - flashing erases the phone.", "Backup data dahulu - flash memadam telefon."));
+    }
+
+    // ---------- apps page: list and remove (bloatware) ----------
+    // never offered for removal: removing these can leave the phone unusable
+    static readonly string[] ProtectedExact = { "android", "com.android.settings", "com.android.systemui", "com.android.phone", "com.android.shell", "com.android.bluetooth", "com.android.packageinstaller", "com.google.android.gms", "com.google.android.gsf" };
+    static readonly string[] ProtectedPrefix = { "com.android.providers.", "com.android.inputmethod", "com.android.server.", "com.android.networkstack", "com.android.permissioncontroller", "com.android.cellbroadcast" };
+
+    // home screen apps (launchers) found on the phone: disabling the only launcher leaves no home screen, on any brand
+    static HashSet<string> HomePkgs = new HashSet<string>();
+
+    static bool IsProtected(string p)
+    {
+        if (Array.IndexOf(ProtectedExact, p) >= 0 || HomePkgs.Contains(p)) return true;
+        foreach (var x in ProtectedPrefix) if (p.StartsWith(x)) return true;
+        return false;
+    }
+
+    static readonly Regex PkgName = new Regex("^[A-Za-z0-9_.]+$");   // package names go into a command line
+
+    // Advice for well-known packages: kind = safe (ads/tracking), optional (a normal app), careful (some feature depends on it).
+    // General community advice written from memory, not a guarantee; anything not listed is shown as "unknown".
+    static readonly Dictionary<string, string[]> AppHints = BuildHints();
+    static Dictionary<string, string[]> BuildHints()
+    {
+        var d = new Dictionary<string, string[]>();
+        Action<string, string, string, string> a = (pkg, kind, en, ms) => d[pkg] = new[] { kind, en, ms };
+        a("com.miui.analytics", "safe", "Xiaomi analytics (tracking)", "Analitik Xiaomi");
+        a("com.miui.msa.global", "safe", "Xiaomi system ads", "Iklan sistem Xiaomi");
+        a("com.xiaomi.mipicks", "safe", "GetApps store (ads)", "Kedai GetApps (iklan)");
+        a("com.miui.bugreport", "safe", "Xiaomi bug reporter", "Pelapor pepijat Xiaomi");
+        a("com.facebook.appmanager", "safe", "Facebook helper", "Pembantu Facebook");
+        a("com.facebook.services", "safe", "Facebook services", "Perkhidmatan Facebook");
+        a("com.facebook.system", "safe", "Facebook installer", "Pemasang Facebook");
+        a("com.netflix.partner.activation", "safe", "Netflix activation", "Pengaktifan Netflix");
+        a("com.miui.player", "optional", "Mi Music player", "Pemain muzik Mi");
+        a("com.miui.videoplayer", "optional", "Mi Video player", "Pemain video Mi");
+        a("com.miui.yellowpage", "optional", "Xiaomi Yellow Pages", "Yellow Pages Xiaomi");
+        a("com.google.android.youtube", "optional", "YouTube", "YouTube");
+        a("com.google.android.apps.youtube.music", "optional", "YouTube Music", "YouTube Music");
+        a("com.google.android.videos", "optional", "Google TV (movies)", "Google TV (filem)");
+        a("com.google.android.apps.photos", "optional", "Google Photos", "Google Photos");
+        a("com.google.android.apps.docs", "optional", "Google Drive", "Google Drive");
+        a("com.google.android.apps.maps", "optional", "Google Maps", "Google Maps");
+        a("com.google.android.gm", "optional", "Gmail", "Gmail");
+        a("com.google.android.apps.tachyon", "optional", "Google Meet", "Google Meet");
+        a("com.android.chrome", "optional", "Chrome browser", "Pelayar Chrome");
+        a("com.android.calculator2", "optional", "Calculator", "Kalkulator");
+        a("org.lineageos.recorder", "optional", "Voice recorder", "Perakam suara");
+        a("org.lineageos.jelly", "optional", "Jelly browser", "Pelayar Jelly");
+        a("org.lineageos.etar", "optional", "Etar calendar", "Kalendar Etar");
+        a("org.lineageos.aperture", "careful", "Camera app", "Aplikasi kamera");
+        a("com.android.vending", "careful", "Google Play Store", "Google Play Store");
+        a("com.android.contacts", "careful", "Contacts", "Kenalan");
+        a("com.android.messaging", "careful", "Messages (SMS)", "Mesej (SMS)");
+        a("com.android.deskclock", "careful", "Clock and alarms", "Jam dan penggera");
+        a("org.lineageos.updater", "careful", "LineageOS updater", "Pengemas kini LineageOS");
+        a("org.lineageos.audiofx", "careful", "Audio effects", "Kesan audio");
+        return d;
+    }
+
+    // filled when the list is loaded: apps you installed yourself, and apps that show an icon in the app drawer
+    static HashSet<string> UserPkgs = new HashSet<string>(), LauncherPkgs = new HashSet<string>();
+
+    // kind of an app for the advice column: core (protected), safe, optional, careful, yours (installed by you),
+    // sysicon (unlisted system app with an icon), sysbg (unlisted background part) or unknown (no extra information)
+    static string AppKind(string p)
+    {
+        if (IsProtected(p)) return "core";
+        string[] h;
+        if (AppHints.TryGetValue(p, out h)) return h[0];
+        if (UserPkgs.Contains(p))   // GApps parts are installed like user apps but are not your choice: be careful with them
+            return p.StartsWith("com.google.") || p.StartsWith("com.android.") || p.StartsWith("android.") ? "gapps" : "yours";
+        if (LauncherPkgs.Count > 0) return LauncherPkgs.Contains(p) ? "sysicon" : "sysbg";
+        return "unknown";
+    }
+
+    HashSet<string> ListLauncherPkgs() { return ListActivityPkgs("LAUNCHER"); }   // the apps you see in the app drawer
+
+    // packages that have an activity in the given category: LAUNCHER = app drawer apps, HOME = home screen apps (launchers)
+    HashSet<string> ListActivityPkgs(string category)
+    {
+        var s = new HashSet<string>();
+        foreach (var l in Exec(Adb, "shell cmd package query-activities --brief -a android.intent.action.MAIN -c android.intent.category." + category, null, false, 20000).Split('\n'))
+        {
+            string t = l.Trim(); int i = t.IndexOf('/');
+            if (i > 0 && t.IndexOf(' ') < 0 && PkgName.IsMatch(t.Substring(0, i))) s.Add(t.Substring(0, i));
+        }
+        return s;
+    }
+
+    static ListViewItem MakeAppItem(string p)
+    {
+        string kind = AppKind(p), desc = "", tag; Color c;
+        string[] h; if (AppHints.TryGetValue(p, out h)) desc = T(h[1], h[2]); else if (HomePkgs.Contains(p)) desc = T("Home screen (launcher)", "Skrin utama (launcher)");
+        else if (kind == "core") desc = T("System component", "Komponen sistem");
+        switch (kind)
+        {
+            case "safe": tag = T("Safe to disable", "Selamat dilumpuhkan"); c = Color.SeaGreen; break;
+            case "optional": tag = T("Optional app", "Aplikasi pilihan"); c = Color.SteelBlue; break;
+            case "careful": tag = T("Careful", "Hati-hati"); c = Color.DarkOrange; break;
+            case "core": tag = T("Core (protected)", "Teras (dilindungi)"); c = Color.Firebrick; break;
+            case "yours": tag = T("Installed by you", "Dipasang oleh awak"); c = Color.SlateBlue; break;
+            case "gapps": tag = T("Google part: careful", "Bahagian Google: hati-hati"); c = Color.DarkOrange; break;
+            case "sysicon": tag = T("Unknown (has an icon)", "Tak diketahui (ada ikon)"); c = Muted; break;
+            case "sysbg": tag = T("Background: leave it", "Latar: biarkan"); c = Color.Sienna; break;
+            default: tag = T("Unknown", "Tak diketahui"); c = Muted; break;
+        }
+        var it = new ListViewItem(p) { UseItemStyleForSubItems = false };
+        it.SubItems.Add(desc);
+        it.SubItems.Add(tag).ForeColor = c;
+        return it;
+    }
+
+    void SearchApp()
+    {
+        string p = appList.SelectedItems.Count > 0 ? appList.SelectedItems[0].Text : appList.CheckedItems.Count > 0 ? appList.CheckedItems[0].Text : null;
+        if (p == null) { MessageBox.Show(T("Click an app in the list first.", "Klik satu aplikasi dalam senarai dahulu."), Cap); return; }
+        OpenUrl("https://www.google.com/search?q=" + Uri.EscapeDataString("android package " + p + " what is it safe to disable"));
+    }
+
+    List<string> ListPackages(string flag)
+    {
+        var res = new List<string>();
+        foreach (var l in Exec(Adb, "shell pm list packages " + flag, null, false, 20000).Split('\n'))
+        {
+            string t = l.Trim();
+            if (t.StartsWith("package:") && PkgName.IsMatch(t.Substring(8))) res.Add(t.Substring(8));
+        }
+        res.Sort(StringComparer.OrdinalIgnoreCase);
+        return res;
+    }
+
+    string AppFlag() { return appFilter.SelectedIndex == 0 ? "-3" : appFilter.SelectedIndex == 1 ? "-s" : appFilter.SelectedIndex == 3 ? "-d" : ""; }
+
+    void FillApps()
+    {
+        string q = appSearch.Text.Trim().ToLower();
+        appList.BeginUpdate(); appList.Items.Clear();
+        int hidden = 0;
+        foreach (var p in appAll)
+        {
+            if (q != "" && !p.ToLower().Contains(q)) continue;
+            if (appHideBg.Checked && AppKind(p) == "sysbg") { hidden++; continue; }   // background parts: nothing a user should touch
+            appList.Items.Add(MakeAppItem(p));
+        }
+        appList.EndUpdate();
+        appCount.Text = string.Format(T("{0} apps shown", "{0} aplikasi dipaparkan"), appList.Items.Count)
+            + (hidden > 0 ? string.Format(T(" ({0} background parts hidden)", " ({0} bahagian latar disembunyi)"), hidden) : "");
+    }
+
+    void LoadApps()
+    {
+        if (busy || !NeedSystem()) return;
+        string flag = AppFlag();
+        busy = true; SetEnabled(false); prog.Visible = true; appCount.Text = T("Loading...", "Memuatkan...");
+        new Thread(() =>
+        {
+            List<string> pk = null; string err = null;
+            try
+            {
+                pk = ListPackages(flag);
+                UserPkgs = new HashSet<string>(flag == "-3" ? pk : ListPackages("-3"));   // what you installed yourself
+                LauncherPkgs = ListLauncherPkgs();                                         // what has an icon
+                HomePkgs = ListActivityPkgs("HOME");                                       // launchers: always protected
+            }
+            catch (Exception ex) { err = ex.Message; }
+            busy = false;
+            Ui(() => { SetEnabled(true); prog.Visible = false; if (pk != null) { appAll = pk; FillApps(); } else { appCount.Text = ""; MessageBox.Show(err, Cap); } });
+        }) { IsBackground = true }.Start();
+    }
+
+    void UninstallApps()
+    {
+        if (!NeedSystem()) return;
+        var sel = new List<string>();
+        foreach (ListViewItem it in appList.CheckedItems) sel.Add(it.Text);
+        if (sel.Count == 0) { MessageBox.Show(T("Tick the apps to remove first.", "Tandakan aplikasi yang mahu dibuang dahulu."), Cap); return; }
+        var prot = sel.FindAll(IsProtected);
+        if (prot.Count > 0)
+        {
+            MessageBox.Show(T("These apps are protected because removing them can break the phone. Untick them:\n\n", "Aplikasi ini dilindungi kerana membuangnya boleh merosakkan telefon. Nyahtanda:\n\n") + string.Join("\n", prot.ToArray()), Cap);
+            return;
+        }
+        string shown = string.Join("\n", sel.GetRange(0, Math.Min(15, sel.Count)).ToArray()) + (sel.Count > 15 ? "\n..." : "");
+        if (MessageBox.Show(string.Format(T("Remove {0} app(s) for this phone?\n\n{1}\n\nSystem apps can be restored with 'Restore an app'. Apps you installed must be installed again.",
+                                            "Buang {0} aplikasi untuk telefon ini?\n\n{1}\n\nAplikasi sistem boleh dipulihkan dengan 'Pulihkan aplikasi'. Aplikasi yang awak pasang perlu dipasang semula."), sel.Count, shown),
+                            T("Remove apps", "Buang aplikasi"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        string flag = AppFlag();
+        Run(T("Remove apps", "Buang aplikasi"), () =>
+        {
+            int ok = 0; bool needRoot = false;
+            foreach (var p in sel)
+            {
+                string o = Exec(Adb, "shell pm uninstall --user 0 " + p, null, true);
+                if (o.Contains("Success")) ok++;
+                else { Log(T("Failed: ", "Gagal: ") + p); if (o.Contains("only root")) needRoot = true; }
+            }
+            Log(string.Format(T("{0} of {1} removed.", "{0} daripada {1} dibuang."), ok, sel.Count));
+            if (needRoot) Log(T("This phone does not allow removing system apps without root. Use 'Disable ticked apps' instead: it hides and stops the app, and 'Enable ticked apps' brings it back.",
+                                "Telefon ini tak benarkan membuang aplikasi sistem tanpa root. Guna 'Lumpuhkan yang ditanda' sebaliknya: ia menyembunyi dan menghentikan aplikasi, dan 'Hidupkan yang ditanda' memulihkannya."));
+            var pk = ListPackages(flag);   // refresh the list
+            Ui(() => { appAll = pk; FillApps(); });
+        });
+    }
+
+    // the shared core of the Disable / Enable buttons: returns how many packages changed state
+    int SetAppsState(List<string> pkgs, bool enable, bool log)
+    {
+        string verb = enable ? "enable" : "disable-user"; int ok = 0;
+        foreach (var p in pkgs)
+        {
+            if (!PkgName.IsMatch(p)) continue;
+            string o = Exec(Adb, "shell pm " + verb + " --user 0 " + p, null, log);
+            if (o.Contains("new state")) ok++; else if (log) Log(T("Failed: ", "Gagal: ") + p);
+        }
+        return ok;
+    }
+
+    // Flash Deck.exe --phonetest: with a phone connected, disables Recorder, checks it, then enables it again; writes phonetest.txt
+    public void PhoneSelfTest()
+    {
+        var r = new StringBuilder();
+        Action<string, bool> chk = (n, ok) => r.AppendLine((ok ? "PASS " : "FAIL ") + n);
+        const string pkg = "org.lineageos.recorder";
+        try
+        {
+            string dd, mm, vv; string st = Detect(out dd, out mm, out vv);
+            chk("phone found in system mode (" + st + ")", st == "device");
+            if (st == "device")
+            {
+                var sysApps = ListPackages("-s");
+                chk("system app list is not empty (" + sysApps.Count + ")", sysApps.Count > 0);
+                chk("launcher list is not empty (" + ListLauncherPkgs().Count + ")", ListLauncherPkgs().Count > 0);
+                chk("test app is present", sysApps.Contains(pkg));
+                if (sysApps.Contains(pkg))
+                {
+                    try
+                    {
+                        chk("disable reports success", SetAppsState(new List<string> { pkg }, false, false) == 1);
+                        chk("app appears in the Disabled list", ListPackages("-d").Contains(pkg));
+                    }
+                    finally   // always put the phone back
+                    {
+                        chk("enable reports success", SetAppsState(new List<string> { pkg }, true, false) == 1);
+                    }
+                    chk("app is gone from the Disabled list again", !ListPackages("-d").Contains(pkg));
+                    chk("app is still installed", ListPackages("-s").Contains(pkg));
+                }
+            }
+        }
+        catch (Exception ex) { r.AppendLine("FAIL exception: " + ex.Message); }
+        File.WriteAllText(Path.Combine(Root, "phonetest.txt"), r.ToString());
+    }
+
+    // disable (hide and stop) or enable the ticked apps: reversible and works without root, unlike removing system apps
+    void DisableApps(bool enable)
+    {
+        if (!NeedSystem()) return;
+        var sel = new List<string>();
+        foreach (ListViewItem it in appList.CheckedItems) sel.Add(it.Text);
+        if (sel.Count == 0) { MessageBox.Show(T("Tick the apps first.", "Tandakan aplikasi dahulu."), Cap); return; }
+        if (!enable)
+        {
+            var prot = sel.FindAll(IsProtected);
+            if (prot.Count > 0)
+            {
+                MessageBox.Show(T("These apps are protected because disabling them can break the phone. Untick them:\n\n", "Aplikasi ini dilindungi kerana melumpuhkannya boleh merosakkan telefon. Nyahtanda:\n\n") + string.Join("\n", prot.ToArray()), Cap);
+                return;
+            }
+            string shown = string.Join("\n", sel.GetRange(0, Math.Min(15, sel.Count)).ToArray()) + (sel.Count > 15 ? "\n..." : "");
+            if (MessageBox.Show(string.Format(T("Disable {0} app(s)?\n\n{1}\n\nThey are hidden and stopped. 'Enable ticked apps' (filter: Disabled apps) brings them back.",
+                                                "Lumpuhkan {0} aplikasi?\n\n{1}\n\nIa disembunyi dan dihentikan. 'Hidupkan yang ditanda' (penapis: Aplikasi dilumpuhkan) memulihkannya."), sel.Count, shown),
+                                T("Disable apps", "Lumpuhkan aplikasi"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
+        }
+        string flag = AppFlag();
+        Run(enable ? T("Enable apps", "Hidupkan aplikasi") : T("Disable apps", "Lumpuhkan aplikasi"), () =>
+        {
+            int ok = SetAppsState(sel, enable, true);
+            Log(string.Format(enable ? T("{0} of {1} enabled.", "{0} daripada {1} dihidupkan.") : T("{0} of {1} disabled.", "{0} daripada {1} dilumpuhkan."), ok, sel.Count));
+            var pk = ListPackages(flag);   // refresh the list
+            Ui(() => { appAll = pk; FillApps(); });
+        });
+    }
+
+    void RestoreApp()
+    {
+        if (!NeedSystem()) return;
+        string p = Interaction.InputBox(T("Package name to bring back (for example com.android.calculator2):", "Nama pakej yang mahu dipulihkan (contoh com.android.calculator2):"), T("Restore an app", "Pulihkan aplikasi"), "").Trim();
+        if (p == "") return;
+        if (!PkgName.IsMatch(p)) { MessageBox.Show(T("A package name may only contain letters, digits, dots and underscores.", "Nama pakej hanya boleh mengandungi huruf, nombor, titik dan garis bawah."), Cap); return; }
+        Run(T("Restore ", "Pulihkan ") + p, () => Exec(Adb, "shell cmd package install-existing --user 0 " + p, null, true));
     }
 
     // ---------- unlock guide (the steps depend on the selected brand) ----------
