@@ -36,12 +36,14 @@ build.bat      builds "Flash Deck.exe" (needs only Windows' built-in C# compiler
 package.bat    builds and zips to dist\FlashDeck-portable.zip
 ```
 
-`Flash Deck.exe --page=N` opens a specific page (0 guide, 1 tools, 2 check, 3 unlock, 4 log).
+Developer switches: `Flash Deck.exe --page=N` opens a page (0 guide, 1 tools, 2 check, 3 unlock, 4 log), `--wa=1366x728` pretends the screen is that size, and `--selftest` writes `selftest.txt` with a few logic checks.
 
 ## Notes and limits
 
 - Commands for brands other than Xiaomi are best-effort; check the manufacturer's guide.
 - Samsung uses Odin / Download mode, not fastboot: only reboot and sideload work.
+- If `platform-tools` is missing, a setup window explains how to get it and offers a "Check again" button.
+- The window fits small screens (for example 1366x768), but the app is not DPI-aware: on 125-150% display scaling Windows enlarges it and the text can look slightly soft.
 - The app is unsigned, so Windows SmartScreen or antivirus may warn about it. Build it yourself from the source if in doubt.
 - Tested with a Xiaomi Mi 10T (M2007J3SY) running LineageOS. Other phones are untested.
 - Released under the MIT License (see `LICENSE`). Google's `platform-tools` is not included and has its own license.

@@ -139,6 +139,43 @@ class Profile
     public string LockAlt { get { return Alt == null ? null : Alt.Replace("unlock", "lock"); } }
 }
 
+// Shown instead of the main window while Google's platform-tools (adb + fastboot) are missing
+class SetupForm : Form
+{
+    public SetupForm()
+    {
+        Text = App.Cap; ClientSize = new Size(640, 410); FormBorderStyle = FormBorderStyle.FixedDialog; MaximizeBox = false; MinimizeBox = false;
+        StartPosition = FormStartPosition.CenterScreen; BackColor = App.PageBg; ForeColor = App.Ink; Font = new Font("Segoe UI", 9.5f);
+        try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { }
+        string root = Path.GetDirectoryName(Application.ExecutablePath);
+
+        var card = new Card { Left = 20, Top = 20, MinimumSize = new Size(600, 0) };
+        card.Controls.Add(new Label { Text = App.T("Welcome to Flash Deck", "Selamat datang ke Flash Deck"), AutoSize = true, Font = new Font("Segoe UI", 14f, FontStyle.Bold), Margin = new Padding(0, 0, 0, 6) });
+        Action<string> line = s => card.Controls.Add(new Label { Text = s, AutoSize = true, MaximumSize = new Size(520, 0), ForeColor = App.Muted, UseMnemonic = false, Margin = new Padding(0, 4, 0, 2) });
+        line(App.T("Flash Deck uses Google's platform-tools (adb and fastboot). They are free but not included, so one quick setup step is needed:",
+                   "Flash Deck menggunakan platform-tools Google (adb dan fastboot). Ia percuma tetapi tak disertakan, jadi satu langkah persediaan diperlukan:"));
+        line("1.  " + App.T("Download platform-tools for Windows (button below) and extract the zip.", "Muat turun platform-tools untuk Windows (butang di bawah) dan extract zip itu."));
+        line("2.  " + App.T("Put the 'platform-tools' folder next to Flash Deck.exe, so that this file exists:", "Letak folder 'platform-tools' di sebelah Flash Deck.exe, supaya fail ini wujud:"));
+        card.Controls.Add(new Label { Text = Path.Combine(root, "platform-tools", "adb.exe"), AutoSize = true, MaximumSize = new Size(520, 0), Font = new Font("Consolas", 9f), UseMnemonic = false, Margin = new Padding(22, 2, 0, 2) });
+        line("3.  " + App.T("Press 'Check again'.", "Tekan 'Semak semula'."));
+        Controls.Add(card);
+
+        Func<string, string, int, bool, RBtn> mk = (text, glyph, w, primary) =>
+        {
+            var b = new RBtn { Text = text, Glyph = glyph, Width = w, Height = 40, Font = Font, GlyphColor = App.Accent };
+            if (primary) { b.Fill = App.Accent; b.Edge = App.Accent; b.Fore = Color.White; b.GlyphColor = Color.White; }
+            Controls.Add(b); return b;
+        };
+        var dl = mk(App.T("Download platform-tools", "Muat turun platform-tools"), "", 220, true); dl.Left = 20; dl.Top = 340;
+        dl.Click += (s, e) => { try { Process.Start("https://developer.android.com/tools/releases/platform-tools"); } catch (Exception) { } };
+        var op = mk(App.T("Open this folder", "Buka folder ini"), "", 150, false); op.Left = 250; op.Top = 340;
+        op.Click += (s, e) => { try { Process.Start("explorer.exe", root); } catch (Exception) { } };
+        var ck = mk(App.T("Check again", "Semak semula"), "", 150, false); ck.Left = 410; ck.Top = 340; ck.DialogResult = DialogResult.Retry;
+        AcceptButton = ck;
+        var ex = mk(App.T("Exit", "Keluar"), null, 50, false); ex.Left = 570; ex.Top = 340; ex.DialogResult = DialogResult.Cancel; CancelButton = ex;
+    }
+}
+
 // ROM option for the guide: which zip to look for in the Rom folder, and what to remember about it
 class RomOpt
 {
@@ -245,7 +282,8 @@ class App : Form
     static readonly string RomDir = Path.Combine(Root, "Rom");
     static readonly string Adb = Path.Combine(Pt, "adb.exe");
     static readonly string Fb = Path.Combine(Pt, "fastboot.exe");
-    const string Cap = "Flash Deck", Version = "1.0.0";
+    public const string Cap = "Flash Deck", Version = "1.0.1";
+    static Size WorkArea;   // usable screen size; --wa=WxH overrides it for testing small screens
     const int PgGuide = 0, PgTools = 1, PgCheck = 2, PgUnlock = 3, PgLog = 4;
     static int StartPage = 0;
 
@@ -272,22 +310,45 @@ class App : Form
     static void Main(string[] args)
     {
         Application.EnableVisualStyles();
+        WorkArea = Screen.PrimaryScreen.WorkingArea.Size;
         foreach (var a in args)
-            if (a.StartsWith("--page=")) int.TryParse(a.Substring(7), out StartPage);
-        if (!File.Exists(Adb) || !File.Exists(Fb))
         {
-            if (MessageBox.Show(T("platform-tools folder not found at:\n", "Folder platform-tools tak jumpa di:\n") + Pt + "\n\n" +
-                    T("Open the official download page? Extract it so the 'platform-tools' folder sits next to Flash Deck.exe.",
-                      "Buka halaman muat turun rasmi? Extract supaya folder 'platform-tools' berada di sebelah Flash Deck.exe."), Cap, MessageBoxButtons.YesNo) == DialogResult.Yes)
-                try { Process.Start("https://developer.android.com/tools/releases/platform-tools"); } catch (Exception) { }
-            return;
+            if (a.StartsWith("--page=")) int.TryParse(a.Substring(7), out StartPage);
+            else if (a.StartsWith("--wa="))
+            {
+                var wh = a.Substring(5).Split('x'); int w, h;
+                if (wh.Length == 2 && int.TryParse(wh[0], out w) && int.TryParse(wh[1], out h)) WorkArea = new Size(w, h);
+            }
         }
+        if (Array.IndexOf(args, "--selftest") >= 0) { SelfTest(); return; }
+        // first run: until adb and fastboot are next to the app, show the setup window (Check again = Retry)
+        while (!File.Exists(Adb) || !File.Exists(Fb))
+            if (new SetupForm().ShowDialog() != DialogResult.Retry) return;
         Application.Run(new App());
+    }
+
+    // Flash Deck.exe --selftest writes selftest.txt: quick checks of the pure logic (ROM detection, brand matching, lock commands)
+    static void SelfTest()
+    {
+        var r = new StringBuilder();
+        Action<string, bool> chk = (n, ok) => r.AppendLine((ok ? "PASS " : "FAIL ") + n);
+        chk("lineage flavor", CustomRomName("lineage_apollon-user") == "LineageOS");
+        chk("rising flavor", CustomRomName("rising_apollon-userdebug") == "Rising");
+        chk("stock flavor is not a custom ROM", CustomRomName("apollo-user") == "");
+        chk("null flavor", CustomRomName(null) == "");
+        chk("brand xiaomi", ProfileIndex("Xiaomi") == 0);
+        chk("brand google", ProfileIndex("Google") == 1);
+        chk("brand unknown falls back to Other", ProfileIndex("Acme") == Profiles.Length - 1);
+        chk("samsung has no unlock command", Profiles[ProfileIndex("samsung")].Unlock == null);
+        chk("lock commands derive from unlock", Profiles[0].Lock == "oem lock" && Profiles[1].LockAlt == "oem lock");
+        File.WriteAllText(Path.Combine(Root, "selftest.txt"), r.ToString());
     }
 
     App()
     {
-        Text = Cap; Width = 1000; Height = 900; MinimumSize = new Size(880, 600);
+        Text = Cap;
+        Width = Math.Min(1000, WorkArea.Width - 20); Height = Math.Min(900, WorkArea.Height - 20);   // fit small screens (e.g. 1366x768 laptops)
+        MinimumSize = new Size(Math.Min(880, Width), Math.Min(600, Height));
         Font = new Font("Segoe UI", 9.5f); StartPosition = FormStartPosition.CenterScreen; BackColor = PageBg; ForeColor = Ink;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { }
 
@@ -668,9 +729,12 @@ class App : Form
 
     // ---------- phone detection ----------
     // returns none / device / recovery / sideload / unauthorized / fastboot; detail = text for the status card, mfr/dev = manufacturer/codename
-    string Detect(out string detail, out string mfr, out string dev)
+    string Detect(out string detail, out string mfr, out string dev) { string rom; return Detect(out detail, out mfr, out dev, out rom); }
+
+    // rom = the build flavor (e.g. "lineage_apollon-user"), used to tell a custom ROM from the stock one
+    string Detect(out string detail, out string mfr, out string dev, out string rom)
     {
-        string st = "none"; detail = ""; mfr = ""; dev = "";
+        string st = "none"; detail = ""; mfr = ""; dev = ""; rom = "";
         foreach (var line in Exec(Adb, "devices", null, false, 5000).Split('\n'))
         {
             var p = line.Trim().Split('\t');
@@ -679,11 +743,11 @@ class App : Form
         if (st == "device" || st == "recovery")
         {
             var v = new List<string>();
-            foreach (var l in Exec(Adb, "shell \"getprop ro.product.model; getprop ro.build.version.release; getprop ro.product.manufacturer; getprop ro.product.device\"", null, false, 5000).Split('\n'))
+            foreach (var l in Exec(Adb, "shell \"getprop ro.product.model; getprop ro.build.version.release; getprop ro.product.manufacturer; getprop ro.product.device; getprop ro.build.flavor\"", null, false, 5000).Split('\n'))
                 if (l.Trim() != "") v.Add(l.Trim());
             if (v.Count >= 4)
             {
-                mfr = v[2]; dev = v[3];
+                mfr = v[2]; dev = v[3]; if (v.Count >= 5) rom = v[4];
                 detail = v[2] + " " + v[0] + " (" + v[3] + ")  ·  Android " + v[1];
             }
         }
@@ -704,14 +768,14 @@ class App : Form
         polling = true;
         ThreadPool.QueueUserWorkItem(_ =>
         {
-            string st = "none", detail = "", mfr = "", dev = "";
-            try { st = Detect(out detail, out mfr, out dev); } catch (Exception) { }
+            string st = "none", detail = "", mfr = "", dev = "", rom = "";
+            try { st = Detect(out detail, out mfr, out dev, out rom); } catch (Exception) { }
             if (!busy)
             {
                 state = st;
                 Ui(() =>
                 {
-                    ShowState(st, detail);
+                    ShowState(st, detail, rom);
                     if (mfr != "")
                     {
                         brand.SelectedIndex = ProfileIndex(mfr); codename = dev;
@@ -732,15 +796,28 @@ class App : Form
         });
     }
 
-    void ShowState(string st, string detail)
+    // name of a known custom ROM from the build flavor ("" = stock or unknown)
+    static string CustomRomName(string flavor)
     {
+        string f = (flavor ?? "").ToLower();
+        foreach (var k in new[] { "lineage", "crdroid", "rising", "alpha", "evolution", "pixelos", "aosp", "arrow", "paranoid", "derpfest", "havoc" })
+            if (f.Contains(k)) return k == "lineage" ? "LineageOS" : char.ToUpper(k[0]) + k.Substring(1);
+        return "";
+    }
+
+    void ShowState(string st, string detail, string rom = "")
+    {
+        string cr = CustomRomName(rom);
         Color c = Color.Gray; string t = T("No phone detected", "Tiada telefon dikesan"), g = "", h = T("Next: connect the phone with a USB cable", "Seterusnya: sambung telefon dengan kabel USB"),
             i = T("Connect USB and enable USB debugging, or enter fastboot mode.", "Sambung USB + hidupkan USB debugging, atau masuk mod fastboot.");
         int step = 0;   // which guide card is highlighted
         switch (st)
         {
             case "device": c = Color.SeaGreen; g = ""; t = T("Connected (system)", "Disambung (sistem)"); i = detail;
-                h = T("Next: Reboot to Bootloader (step 1)", "Seterusnya: Reboot ke Bootloader (langkah 1)"); break;
+                h = T("Next: Reboot to Bootloader (step 1)", "Seterusnya: Reboot ke Bootloader (langkah 1)");
+                if (cr != "")   // already installed: do not send the user back to step 1
+                { h = string.Format(T("Done: the phone already runs {0}. Use step 1 only to install a different ROM.", "Siap: telefon sudah guna {0}. Guna langkah 1 hanya untuk pasang ROM lain."), cr); step = 3; }
+                break;
             case "recovery": c = Color.SteelBlue; g = ""; t = T("Recovery mode", "Mod Recovery"); i = T("Choose Apply update > Apply from ADB to sideload.", "Pilih Apply update > Apply from ADB untuk sideload.");
                 h = T("Next: Format data, then Apply from ADB (step 2)", "Seterusnya: Format data, kemudian Apply from ADB (langkah 2)"); step = 1; break;
             case "sideload": c = Color.SteelBlue; g = ""; t = T("ADB Sideload mode - ready to receive files", "Mod ADB Sideload - sedia terima fail"); i = "";
