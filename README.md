@@ -8,11 +8,12 @@ Written in C# (WinForms), built with the compiler that ships with Windows. No in
 
 ## Features
 
-- **ROM Guide**: numbered steps (recovery, format data, install ROM, GApps) with the current step highlighted from the phone's state. ROM choices: LineageOS, RisingOS, AlphaDroid, or any other zip.
+- **Home**: asks what you want to do (install a ROM, hide apps, unlock, phone tools) and sends you to the right page. The sidebar is grouped as Set up and Use.
+- **Install ROM**: numbered steps (recovery, format data, install ROM, GApps) with the current step highlighted from the phone's state. ROM choices: LineageOS, RisingOS, AlphaDroid, or any other zip.
 - **Pre-flight check**: phone detected, battery, bootloader state, files in `Rom\`, valid zips, and ROM codename vs phone codename.
 - **Unlock guide**: steps per brand (Xiaomi/Mi Unlock, Pixel/OnePlus/Nothing `flashing unlock`, Motorola/Sony unlock code), plus a status check.
 - **Tools**: reboot modes, flash `.img` (one or several, in order), sideload `.zip`, MD5 check, stock Xiaomi fastboot ROM (keep data / wipe), phone tools (install APK, screenshot, copy files to/from the phone, battery info, backup photos and downloads), download pages.
-- **Apps (beta)**: list the phone's apps and hide the ones you do not need. *Disable* is reversible and works without root; *Remove* uninstalls (system apps usually need root). Each app gets a coloured hint (safe to disable, optional, careful, core/protected, installed by you, unknown). The home screen app and core system parts are protected. The built-in advice only covers common Xiaomi, Google, Facebook and LineageOS packages, so on other brands most apps show as "unknown": use *Search online*.
+- **Apps (beta)**: the phone's apps load by themselves, grouped by advice (safe to disable, optional, be careful, installed by you, unknown, background parts, core/protected). Tabs switch between your apps, system, all and disabled apps. Tick the ones you do not need and press *Disable* (reversible with *Enable*, no root). The *More* menu has *Remove* (system apps usually need root), *Restore by name*, *Search online* and a switch for background parts. The home screen app and core system parts are protected. The built-in advice only covers common Xiaomi, Google, Facebook and LineageOS packages, so on other brands most apps show as "unknown": use *Search online*.
 - Auto-detects the phone brand and codename, remembers the last phone, logs every session to `logs\`.
 - English (default) and Bahasa Melayu, light and dark themes.
 
@@ -37,7 +38,7 @@ build.bat      builds "Flash Deck.exe" (needs only Windows' built-in C# compiler
 package.bat    builds and zips to dist\FlashDeck-portable.zip
 ```
 
-Developer switches: `Flash Deck.exe --page=N` opens a page (0 guide, 1 tools, 2 check, 3 unlock, 4 apps, 5 log), `--wa=1366x728` pretends the screen is that size, `--selftest` writes `selftest.txt` with logic checks, and `--phonetest` (phone connected) disables then re-enables the Recorder app and writes `phonetest.txt`. For screenshots: `--demo-apps`, `--autoload`, `--filter=N` and `--guide-open`.
+Developer switches: `Flash Deck.exe --page=N` opens a page (0 home, 1 install ROM, 2 tools, 3 check, 4 unlock, 5 apps, 6 log), `--wa=1366x728` pretends the screen is that size, `--selftest` writes `selftest.txt` with logic checks, and `--phonetest` (phone connected) disables then re-enables the Recorder app and writes `phonetest.txt`. For screenshots: `--demo-apps`, `--autoload`, `--filter=N` and `--guide-open`.
 
 ## Notes and limits
 
@@ -47,5 +48,5 @@ Developer switches: `Flash Deck.exe --page=N` opens a page (0 guide, 1 tools, 2 
 - The window fits small screens (for example 1366x768), but the app is not DPI-aware: on 125-150% display scaling Windows enlarges it and the text can look slightly soft.
 - The app is unsigned, so Windows SmartScreen or antivirus may warn about it. Build it yourself from the source if in doubt.
 - Tested with a Xiaomi Mi 10T (M2007J3SY) running LineageOS. Other phones are untested.
-- Apps (beta): on that phone Android refuses to remove system apps without root, so use *Disable*. *Remove* on a stock ROM and *Restore by name* are untested.
+- Apps (beta): on that phone Android refuses to remove system apps without root, so use *Disable*. *Remove* on a stock ROM is untested.
 - Released under the MIT License (see `LICENSE`). Google's `platform-tools` is not included and has its own license.

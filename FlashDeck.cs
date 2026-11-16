@@ -1,6 +1,6 @@
 // Flash Deck - GUI for adb/fastboot. Build with build.bat (C# 5, no install needed).
 // Language (English default / Bahasa Melayu) and theme (light / dark) are saved in lang.txt / theme.txt.
-// Dev switch: start with --page=N (0 guide, 1 tools, 2 check, 3 unlock, 4 apps, 5 log) to open a specific page.
+// Dev switch: start with --page=N (0 home, 1 install ROM, 2 tools, 3 check, 4 unlock, 5 apps, 6 log) to open a specific page.
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -48,7 +48,7 @@ class RBtn : Button   // rounded button; optional icon glyph, and "tile" mode wi
         g.SmoothingMode = SmoothingMode.AntiAlias;
         Color grey = App.Dark ? Color.FromArgb(51, 65, 85) : Color.FromArgb(229, 231, 235), dis = Color.FromArgb(156, 163, 175);
         Color f = !Enabled ? grey : down ? Mix(Fill, Shift * 2) : hover ? Mix(Fill, Shift) : Fill;
-        using (var p = Round(new Rectangle(0, 0, Width - 1, Height - 1), 12))
+        using (var p = Round(new Rectangle(0, 0, Width - 1, Height - 1), Tile ? 20 : 12))
         using (var b = new SolidBrush(f))
         using (var pen = new Pen(Enabled ? Edge : grey))
         {
@@ -89,18 +89,36 @@ class Card : FlowLayoutPanel   // bordered card, vertical layout; Active = highl
         BackColor = App.CardBg; ForeColor = App.Ink; Padding = new Padding(16, 12, 16, 12); Margin = new Padding(0, 0, 0, 12); MinimumSize = new Size(690, 0);
         DoubleBuffered = true;
     }
+    // rounded corners: the corners are painted in the page colour, then the rounded card on top (children sit inside the padding, clear of the corners)
+    protected override void OnPaintBackground(PaintEventArgs e) { e.Graphics.Clear(Parent != null ? Parent.BackColor : App.PageBg); }
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
-        using (var pen = new Pen(Active ? App.Accent : App.Border, Active ? 2f : 1f))
-            e.Graphics.DrawRectangle(pen, Active ? 1 : 0, Active ? 1 : 0, Width - (Active ? 3 : 1), Height - (Active ? 3 : 1));
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+        int bw = Active ? 2 : 1;
+        using (var p = RBtn.Round(new Rectangle(bw / 2, bw / 2, Width - 1 - bw, Height - 1 - bw), 24))
+        {
+            using (var b = new SolidBrush(App.CardBg)) g.FillPath(b, p);
+            using (var pen = new Pen(Active ? App.Accent : App.Border, bw)) g.DrawPath(pen, p);
+        }
     }
 }
 
-class Box : Panel   // bordered panel (status card)
+class Box : Panel   // bordered panel (status card), rounded like Card
 {
-    public Box() { BackColor = App.CardBg; ForeColor = App.Ink; }
-    protected override void OnPaint(PaintEventArgs e) { base.OnPaint(e); using (var pen = new Pen(App.Border)) e.Graphics.DrawRectangle(pen, 0, 0, Width - 1, Height - 1); }
+    static readonly Color Tint = App.Dark ? App.CardBg : Color.FromArgb(247, 247, 244);   // light theme: soft tint, no border
+    public Box() { BackColor = Tint; ForeColor = App.Ink; }
+    protected override void OnPaintBackground(PaintEventArgs e) { e.Graphics.Clear(Parent != null ? Parent.BackColor : App.PageBg); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        base.OnPaint(e);
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
+        using (var p = RBtn.Round(new Rectangle(0, 0, Width - 1, Height - 1), 24))
+        {
+            using (var b = new SolidBrush(Tint)) g.FillPath(b, p);
+            if (App.Dark) using (var pen = new Pen(App.Border)) g.DrawPath(pen, p);
+        }
+    }
 }
 
 class Badge : Control   // numbered circle for steps
@@ -120,11 +138,12 @@ class Logo : Control   // app logo in the sidebar
     protected override void OnPaint(PaintEventArgs e)
     {
         var g = e.Graphics; g.Clear(Parent != null ? Parent.BackColor : BackColor); g.SmoothingMode = SmoothingMode.AntiAlias;
-        using (var p = RBtn.Round(new Rectangle(0, 0, Width - 1, Height - 1), 14))
-        using (var br = new LinearGradientBrush(ClientRectangle, Color.FromArgb(59, 130, 246), Color.FromArgb(99, 102, 241), 45f))
+        using (var p = RBtn.Round(new Rectangle(0, 0, Width - 1, Height - 1), 10))   // flat blue square with a white bolt (same drawing as app.ico)
+        using (var br = new SolidBrush(Color.FromArgb(37, 99, 235)))
             g.FillPath(br, p);
-        if (App.IconFont != null)
-            TextRenderer.DrawText(g, "", App.IconFont, ClientRectangle, Color.White, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        float k = Width / 112f;
+        var bolt = new[] { new PointF(62 * k, 18 * k), new PointF(36 * k, 62 * k), new PointF(55 * k, 62 * k), new PointF(49 * k, 94 * k), new PointF(78 * k, 48 * k), new PointF(58 * k, 48 * k) };
+        using (var wb = new SolidBrush(Color.White)) using (var wp = new Pen(Color.White, 1.4f) { LineJoin = LineJoin.Round }) { g.FillPolygon(wb, bolt); g.DrawPolygon(wp, bolt); }
     }
 }
 
@@ -137,6 +156,201 @@ class Profile
     public string Note { get { return App.T(NoteEn, NoteMs); } }
     public string Lock { get { return Unlock == null ? null : Unlock.Replace("unlock", "lock"); } }
     public string LockAlt { get { return Alt == null ? null : Alt.Replace("unlock", "lock"); } }
+}
+
+class BrandChip : Control   // quiet brand line in the sidebar: icon, brand, how it was found, and a Change link (click opens the menu)
+{
+    public string Caption = "";
+    public BrandChip() { Height = 52; Cursor = Cursors.Hand; SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.Clear(Parent != null ? Parent.BackColor : BackColor); g.SmoothingMode = SmoothingMode.AntiAlias;
+        using (var p = RBtn.Round(new Rectangle(0, 0, Width - 1, Height - 1), 20))
+        using (var b = new SolidBrush(App.Dark ? Color.FromArgb(22, 30, 46) : Color.FromArgb(247, 247, 244))) g.FillPath(b, p);
+        var left = TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis;
+        if (App.IconFont != null)
+            TextRenderer.DrawText(g, "", App.IconFont, new Rectangle(8, 0, 26, Height), App.SideMuted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+        using (var bf = new Font("Segoe UI", 9.5f, FontStyle.Bold)) TextRenderer.DrawText(g, Text, bf, new Rectangle(38, 8, Width - 38 - 40, 18), App.SideText, left);
+        using (var sf = new Font("Segoe UI", 8f)) TextRenderer.DrawText(g, Caption, sf, new Rectangle(38, 28, Width - 38 - 38, 16), App.SideMuted, left);
+        // a small icon button on the right (the whole chip is clickable; the chevron says "a menu opens")
+        var btn = new Rectangle(Width - 32, (Height - 24) / 2, 24, 24);
+        using (var bp = RBtn.Round(btn, 9)) { using (var bb = new SolidBrush(App.CardBg)) g.FillPath(bb, bp); using (var bpen = new Pen(App.Dark ? Color.FromArgb(71, 85, 105) : Color.FromArgb(203, 213, 225))) g.DrawPath(bpen, bp); }
+        if (App.IconFont != null) TextRenderer.DrawText(g, "", App.IconFont, btn, App.Accent, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+    }
+}
+
+class MenuColors : ProfessionalColorTable   // colours for the themed pop-up menu
+{
+    static Color Sel { get { return App.Dark ? Color.FromArgb(40, 60, 100) : Color.FromArgb(219, 234, 254); } }
+    public override Color ToolStripDropDownBackground { get { return App.CardBg; } }
+    public override Color MenuBorder { get { return App.Border; } }
+    public override Color MenuItemBorder { get { return Sel; } }
+    public override Color MenuItemSelected { get { return Sel; } }
+    public override Color MenuItemSelectedGradientBegin { get { return Sel; } }
+    public override Color MenuItemSelectedGradientEnd { get { return Sel; } }
+    public override Color ImageMarginGradientBegin { get { return App.CardBg; } }
+    public override Color ImageMarginGradientMiddle { get { return App.CardBg; } }
+    public override Color ImageMarginGradientEnd { get { return App.CardBg; } }
+}
+
+class Seg : Control   // segmented tabs (the list type on the Apps page)
+{
+    string[] items = new string[0]; int sel;
+    public event EventHandler Changed;
+    public int Count { get { return items.Length; } }
+    public int SelectedIndex { get { return sel; } set { if (value == sel) return; sel = value; Invalidate(); if (Changed != null) Changed(this, EventArgs.Empty); } }
+    public Seg() { Height = 36; Font = new Font("Segoe UI", 9.5f); Cursor = Cursors.Hand; SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); }
+    int W(int i) { return TextRenderer.MeasureText(items[i], Font).Width + 26; }
+    public void SetItems(params string[] it) { items = it; int w = 6; for (int i = 0; i < it.Length; i++) w += W(i); Width = w; Invalidate(); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.Clear(Parent != null ? Parent.BackColor : BackColor); g.SmoothingMode = SmoothingMode.AntiAlias;
+        using (var p = RBtn.Round(new Rectangle(0, 0, Width - 1, Height - 1), 16)) using (var b = new SolidBrush(App.Dark ? Color.FromArgb(22, 30, 46) : Color.FromArgb(244, 244, 241))) g.FillPath(b, p);
+        int x = 3;
+        for (int i = 0; i < items.Length; i++)
+        {
+            var r = new Rectangle(x, 3, W(i), Height - 7);
+            if (i == sel)
+            {
+                using (var p = RBtn.Round(r, 12)) { using (var b = new SolidBrush(App.CardBg)) g.FillPath(b, p); using (var pen = new Pen(App.Border)) g.DrawPath(pen, p); }
+            }
+            TextRenderer.DrawText(g, items[i], Font, r, i == sel ? App.Ink : App.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+            x += r.Width;
+        }
+    }
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        int x = 3;
+        for (int i = 0; i < items.Length; i++) { if (e.X >= x && e.X < x + W(i)) { SelectedIndex = i; return; } x += W(i); }
+    }
+}
+
+class AppRow { public string Pkg, Title, Sub, Tag, Head; public Color Dot; public bool Checked, Locked; }
+
+class AppList : Control   // the apps as plain rows under coloured group headers, with its own scrolling
+{
+    public List<AppRow> Rows = new List<AppRow>(); public string Empty = ""; public string Selected;
+    public event EventHandler Changed;
+    const int RowH = 46, HeadH = 32;
+    int top, hover = -1; readonly VScrollBar vs = new VScrollBar();
+    public AppList()
+    {
+        SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
+        Font = new Font("Segoe UI", 9.5f);
+        vs.Visible = false; vs.Scroll += (s, e) => { top = vs.Value; Invalidate(); }; Controls.Add(vs);
+    }
+    static int H(AppRow r) { return r.Head != null ? HeadH : RowH; }
+    int Total() { int t = 0; foreach (var r in Rows) t += H(r); return t; }
+    public int AppCount { get { int n = 0; foreach (var r in Rows) if (r.Head == null) n++; return n; } }
+    public List<string> CheckedPkgs() { var l = new List<string>(); foreach (var r in Rows) if (r.Head == null && r.Checked) l.Add(r.Pkg); return l; }
+    public void ClearChecks() { foreach (var r in Rows) r.Checked = false; }
+    public void SetRows(List<AppRow> rows) { Rows = rows; top = 0; hover = -1; Selected = null; Relayout(); Invalidate(); }
+    void Relayout()
+    {
+        int total = Total(); bool need = Height > 40 && total > Height - 2;   // (a new control starts at 0 x 0)
+        vs.Visible = need; vs.SetBounds(Width - 19, 6, 17, Math.Max(10, Height - 12));
+        if (need) { vs.Minimum = 0; vs.LargeChange = Math.Max(1, Height - 2); vs.SmallChange = RowH; vs.Maximum = total - 1; top = Math.Max(0, Math.Min(top, total - Height + 2)); vs.Value = top; } else top = 0;
+    }
+    protected override void OnResize(EventArgs e) { base.OnResize(e); Relayout(); }
+    int IndexAt(int y)
+    {
+        int yy = -top;
+        for (int i = 0; i < Rows.Count; i++) { int h = H(Rows[i]); if (y >= yy && y < yy + h) return i; yy += h; }
+        return -1;
+    }
+    protected override void OnMouseWheel(MouseEventArgs e)
+    {
+        if (!vs.Visible) return;
+        top = Math.Max(0, Math.Min(top - e.Delta / 120 * RowH * 2, Total() - Height + 2)); vs.Value = top; Invalidate();
+    }
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        int i = IndexAt(e.Y); if (i >= 0 && (Rows[i].Head != null)) i = -1;
+        if (i != hover) { hover = i; Cursor = i >= 0 && !Rows[i].Locked ? Cursors.Hand : Cursors.Default; Invalidate(); }
+    }
+    protected override void OnMouseLeave(EventArgs e) { hover = -1; Invalidate(); }
+    protected override void OnMouseDown(MouseEventArgs e)
+    {
+        int i = IndexAt(e.Y); if (i < 0 || Rows[i].Head != null) return;
+        Selected = Rows[i].Pkg; if (!Rows[i].Locked) Rows[i].Checked = !Rows[i].Checked;
+        Invalidate(); if (Changed != null) Changed(this, EventArgs.Empty);
+    }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.Clear(Parent != null ? Parent.BackColor : App.PageBg); g.SmoothingMode = SmoothingMode.AntiAlias;
+        int w = Width - 1;
+        using (var path = RBtn.Round(new Rectangle(0, 0, w, Height - 1), 24))
+        {
+            using (var b = new SolidBrush(App.CardBg)) g.FillPath(b, path);
+            g.SetClip(path);
+            if (Rows.Count == 0)
+                TextRenderer.DrawText(g, Empty, Font, new Rectangle(20, 0, w - 40, Height), App.Muted, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.WordBreak);
+            int y = -top; int rw = vs.Visible ? w - 22 : w;
+            using (var bold = new Font("Segoe UI", 8.5f, FontStyle.Bold)) using (var small = new Font("Segoe UI", 8f))
+            for (int i = 0; i < Rows.Count; i++)
+            {
+                var r = Rows[i]; int h = H(r);
+                if (y + h > 0 && y < Height)
+                {
+                    if (r.Head != null)
+                    {
+                        using (var b = new SolidBrush(App.Dark ? Color.FromArgb(22, 30, 46) : Color.FromArgb(247, 247, 244))) g.FillRectangle(b, 0, y, w, h);
+                        using (var b = new SolidBrush(r.Dot)) g.FillEllipse(b, 18, y + h / 2 - 4, 8, 8);
+                        TextRenderer.DrawText(g, r.Head, bold, new Rectangle(34, y, rw - 40, h), App.Muted, TextFormatFlags.Left | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                    }
+                    else
+                    {
+                        if (i == hover || r.Pkg == Selected) using (var b = new SolidBrush(Color.FromArgb(i == hover ? 16 : 26, 37, 99, 235))) g.FillRectangle(b, 0, y, w, h);
+                        using (var pen = new Pen(App.Border)) g.DrawLine(pen, 0, y, w, y);
+                        var cb = new Rectangle(18, y + (h - 16) / 2, 16, 16);
+                        using (var p = RBtn.Round(cb, 8))
+                        {
+                            if (r.Checked) using (var b = new SolidBrush(App.Accent)) g.FillPath(b, p);
+                            else using (var pen = new Pen(r.Locked ? App.Border : App.EdgeC, 1.4f)) g.DrawPath(pen, p);
+                        }
+                        if (r.Checked) using (var pen = new Pen(Color.White, 2f)) g.DrawLines(pen, new[] { new Point(cb.X + 4, cb.Y + 8), new Point(cb.X + 7, cb.Y + 11), new Point(cb.X + 12, cb.Y + 5) });
+                        var fore = r.Locked ? App.Muted : App.Ink;
+                        TextRenderer.DrawText(g, r.Title, Font, new Rectangle(46, y + 6, rw - 46 - (r.Tag != null ? 120 : 10), 20), fore, TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+                        TextRenderer.DrawText(g, r.Sub, small, new Rectangle(46, y + 25, rw - 46 - (r.Tag != null ? 120 : 10), 16), App.Muted, TextFormatFlags.Left | TextFormatFlags.NoPadding | TextFormatFlags.EndEllipsis);
+                        if (r.Tag != null) TextRenderer.DrawText(g, r.Tag, small, new Rectangle(rw - 112, y, 104, h), r.Locked ? App.DangerC : Color.DarkOrange, TextFormatFlags.Right | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+                    }
+                }
+                y += h;
+            }
+            g.ResetClip();
+            using (var pen = new Pen(App.Border)) g.DrawPath(pen, path);
+        }
+    }
+}
+
+class IconCircle : Control   // round tinted badge with an icon (the phone state in the status card)
+{
+    public IconCircle() { SetStyle(ControlStyles.UserPaint | ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true); ForeColor = Color.Gray; Text = ""; }
+    protected override void OnForeColorChanged(EventArgs e) { Invalidate(); base.OnForeColorChanged(e); }
+    protected override void OnTextChanged(EventArgs e) { Invalidate(); base.OnTextChanged(e); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.Clear(Parent != null ? Parent.BackColor : BackColor); g.SmoothingMode = SmoothingMode.AntiAlias;
+        using (var b = new SolidBrush(Color.FromArgb(App.Dark ? 70 : 40, ForeColor))) g.FillEllipse(b, 0, 0, Width - 1, Height - 1);
+        if (App.IconFont != null)
+            using (var f = new Font(App.IconFont.FontFamily, 17f))
+                TextRenderer.DrawText(g, Text, f, ClientRectangle, ForeColor, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+    }
+}
+
+class Pill : Control   // small rounded status chip ("Ready", "Fastboot"...)
+{
+    public Color Tint = Color.Gray;
+    public Pill() { Height = 26; Font = new Font("Segoe UI", 9f); }
+    public void Set(string text, Color tint) { Text = text; Tint = tint; Width = TextRenderer.MeasureText(text, Font).Width + 26; Invalidate(); }
+    protected override void OnPaint(PaintEventArgs e)
+    {
+        var g = e.Graphics; g.Clear(Parent != null ? Parent.BackColor : BackColor); g.SmoothingMode = SmoothingMode.AntiAlias;
+        using (var p = RBtn.Round(new Rectangle(0, 0, Width - 1, Height - 1), Height))
+        using (var b = new SolidBrush(Color.FromArgb(App.Dark ? 70 : 40, Tint))) g.FillPath(b, p);
+        Color fg = App.Dark ? Color.FromArgb(Math.Min(255, Tint.R + 90), Math.Min(255, Tint.G + 90), Math.Min(255, Tint.B + 90)) : Tint;   // lighter text on dark surfaces
+        TextRenderer.DrawText(g, Text, Font, ClientRectangle, fg, TextFormatFlags.HorizontalCenter | TextFormatFlags.VerticalCenter | TextFormatFlags.NoPadding);
+    }
 }
 
 // Shown instead of the main window while Google's platform-tools (adb + fastboot) are missing
@@ -197,7 +411,7 @@ class App : Form
     static bool LoadDark() { try { return File.Exists(ThemeFile) && File.ReadAllText(ThemeFile).Trim() == "dark"; } catch (Exception) { return false; } }
 
     public static readonly Color
-        PageBg = Dark ? Color.FromArgb(24, 31, 46) : Color.FromArgb(241, 245, 249),
+        PageBg = Dark ? Color.FromArgb(24, 31, 46) : Color.White,
         SideBg = Dark ? Color.FromArgb(10, 15, 28) : Color.White,
         CardBg = Dark ? Color.FromArgb(30, 41, 59) : Color.White,
         Border = Dark ? Color.FromArgb(51, 65, 85) : Color.FromArgb(226, 232, 240),
@@ -276,31 +490,65 @@ class App : Form
         return Profiles.Length - 1;
     }
     static readonly string LastFile = Path.Combine(Root, "last-device.txt");   // line 1 = manufacturer, line 2 = codename
-    Profile Prof() { return Profiles[brand.SelectedIndex]; }
+    Profile Prof() { return Profiles[brandIdx]; }
+    static string ShortName(Profile p) { return p.Name.Split(new[] { " /", " (" }, StringSplitOptions.None)[0]; }   // "Xiaomi / Redmi / POCO" -> "Xiaomi"
+
+    // the brand is normally detected from the phone (src = auto); "last" = remembered from the last phone, "manual" = chosen by the user
+    void SetBrand(int i, string src)
+    {
+        bool changed = i != brandIdx; brandIdx = i; brandSrc = src;
+        brandChip.Text = ShortName(Profiles[i]);
+        brandChip.Caption = src == "auto" ? T("auto-detected", "dikesan auto") : src == "last" ? T("last phone", "telefon terakhir") : T("your choice", "pilihan awak");
+        brandChip.Invalidate();
+        if (changed && unlockPage != null) BuildUnlock();
+    }
+
+    void ShowBrandMenu()
+    {
+        var m = new ContextMenuStrip { ShowImageMargin = false, ShowCheckMargin = false, Font = Font, BackColor = CardBg, ForeColor = Ink, Padding = new Padding(4), Renderer = new ToolStripProfessionalRenderer(new MenuColors()) };
+        for (int i = 0; i < Profiles.Length; i++)
+        {
+            int k = i;
+            var it = new ToolStripMenuItem((k == brandIdx ? "✓   " : "      ") + Profiles[k].Name) { ForeColor = k == brandIdx ? Accent : Ink, Padding = new Padding(2, 4, 2, 4) };
+            it.Click += (s, e) => SetBrand(k, "manual");
+            m.Items.Add(it);
+        }
+        m.Opened += (s, e) => { using (var p = RBtn.Round(new Rectangle(0, 0, m.Width, m.Height), 16)) m.Region = new Region(p); };   // soft corners
+        m.Closed += (s, e) => BeginInvoke(new Action(() => m.Dispose()));
+        m.Show(brandChip.PointToScreen(new Point(0, -m.GetPreferredSize(Size.Empty).Height - 6)));   // opens above the chip
+    }
 
     static readonly string Pt = Path.Combine(Root, "platform-tools");
     static readonly string RomDir = Path.Combine(Root, "Rom");
     static readonly string Adb = Path.Combine(Pt, "adb.exe");
     static readonly string Fb = Path.Combine(Pt, "fastboot.exe");
-    public const string Cap = "Flash Deck", Version = "1.1.0";
+    public const string Cap = "Flash Deck", Version = "1.2.0";
     static Size WorkArea;   // usable screen size; --wa=WxH overrides it for testing small screens
-    const int PgGuide = 0, PgTools = 1, PgCheck = 2, PgUnlock = 3, PgApps = 4, PgLog = 5;
+    const int PgHome = 0, PgGuide = 1, PgTools = 2, PgCheck = 3, PgUnlock = 4, PgApps = 5, PgLog = 6;
     static int StartPage = 0;
     static bool DemoApps, AutoLoad, GuideOpen;   // dev switches: --demo-apps (sample list), --autoload (load the real list once the phone is found)
     static int AutoFilter = -1;       // --filter=N picks the list type (0 user, 1 system, 2 all, 3 disabled)
 
-    Label statusIcon, status, info, hint, hRec, hBoot, hRom, hGapps;
+    Label status, info, hint, hintHome, hRec, hBoot, hRom, hGapps;
+    IconCircle statusIcon; Pill statusChip;
+    Dictionary<string, string> lastProps = new Dictionary<string, string>();   // properties read from the phone (system mode)
+    string PropOf(string k) { string v; return lastProps.TryGetValue(k, out v) ? v : ""; }
     TextBox log;
     ProgressBar prog;
     FlowLayoutPanel wizPage, toolPage, checkPage, checkList, unlockPage, appsPage;   // content flows
     Panel wizScroll, toolScroll, checkScroll, unlockScroll, appsScroll, logPage;     // scrolling containers around them
-    RBtn navWiz, navTool, navCheck, navUnlock, navApps, navLog;
-    ListView appList; ComboBox appFilter; TextBox appSearch; Label appCount; CheckBox appHideBg;   // Apps page (remove bloatware)
+    RBtn navWiz, navTool, navCheck, navUnlock, navApps, navLog, navHome;
+    FlowLayoutPanel homePage; Panel homeScroll; Label homeLast;   // Home page: where to start
+    AppList appList; Seg appFilter; TextBox appSearch; Label appCount; RBtn btnDisable, appMore;   // Apps page (remove bloatware)
+    bool appShowBg, appLoaded, appAutoTried; string appHiddenNote = "", appNote = "";   // appNote: result of the last Disable/Enable, shown until you tick something   // appShowBg: also list background parts (hidden by default)
+    [System.Runtime.InteropServices.DllImport("user32.dll")] static extern bool ShowScrollBar(IntPtr h, int bar, bool show);
+    [System.Runtime.InteropServices.DllImport("user32.dll", CharSet = System.Runtime.InteropServices.CharSet.Unicode)] static extern IntPtr SendMessage(IntPtr h, int msg, IntPtr w, string l);
     List<string> appAll = new List<string>();
     CheckBox follow;
-    ComboBox brand;   // index into Profiles
-    Label brandNote, romNote;
-    ComboBox romSel;   // index into Roms
+    int brandIdx; string brandSrc = "last";   // index into Profiles, and where it came from (auto, last, manual)
+    BrandChip brandChip;
+    Label romNote;
+    Seg romSel;   // index into Roms
     readonly List<Card> wizCards = new List<Card>();
     readonly List<Button> btnList = new List<Button>();
     volatile bool busy, polling;
@@ -345,6 +593,7 @@ class App : Form
         chk("rising flavor", CustomRomName("rising_apollon-userdebug") == "Rising");
         chk("stock flavor is not a custom ROM", CustomRomName("apollo-user") == "");
         chk("null flavor", CustomRomName(null) == "");
+        chk("brand short names", ShortName(Profiles[0]) == "Xiaomi" && ShortName(Profiles[1]) == "Google Pixel" && ShortName(Profiles[6]) == "Samsung");
         chk("brand xiaomi", ProfileIndex("Xiaomi") == 0);
         chk("brand google", ProfileIndex("Google") == 1);
         chk("brand unknown falls back to Other", ProfileIndex("Acme") == Profiles.Length - 1);
@@ -371,7 +620,8 @@ class App : Form
         chk("advice: protected beats any hint", AppKind("com.android.settings") == "core");
         chk("advice: unlisted app is unknown", AppKind("com.example.whatever") == "unknown");
         chk("advice: careful app", AppKind("com.android.vending") == "careful");
-        chk("list row has 3 columns", MakeAppItem("com.miui.analytics").SubItems.Count == 3);
+        chk("apps grouped: safe first, core last", GroupOf("safe") == 0 && GroupOf("gapps") == GroupOf("careful") && GroupOf("core") == GroupTitles.Length - 1 && GroupOf("sysicon") == GroupOf("unknown"));
+        chk("row text: hinted app has a description, others a label", AppDesc("com.miui.analytics", "safe") != "" && AppDesc("com.example.whatever", "unknown") == "" && KindLabel("core") != "");
         File.WriteAllText(Path.Combine(Root, "selftest.txt"), r.ToString());
     }
 
@@ -379,13 +629,13 @@ class App : Form
     {
         Text = Cap;
         Width = Math.Min(1000, WorkArea.Width - 20); Height = Math.Min(900, WorkArea.Height - 20);   // fit small screens (e.g. 1366x768 laptops)
-        MinimumSize = new Size(Math.Min(880, Width), Math.Min(600, Height));
+        MinimumSize = new Size(Math.Min(880, Width), Math.Min(700, Height));   // below this the sidebar buttons would overlap
         Font = new Font("Segoe UI", 9.5f); StartPosition = FormStartPosition.CenterScreen; BackColor = PageBg; ForeColor = Ink;
         try { Icon = Icon.ExtractAssociatedIcon(Application.ExecutablePath); } catch (Exception) { }
 
         // --- sidebar ---
         var side = new Panel { Dock = DockStyle.Left, Width = 200, BackColor = SideBg };
-        side.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 1, BackColor = Border });   // thin divider
+        side.Controls.Add(new Panel { Dock = DockStyle.Right, Width = 1, BackColor = EdgeC });   // thin divider
         side.Controls.Add(new Logo { Left = 16, Top = 18 });
         side.Controls.Add(new Label { Text = Cap, Left = 64, Top = 18, AutoSize = true, ForeColor = SideTitle, Font = new Font("Segoe UI", 12.5f, FontStyle.Bold) });
         side.Controls.Add(new Label { Text = "adb · fastboot · v" + Version, Left = 66, Top = 42, AutoSize = true, ForeColor = SideMuted, Font = new Font("Segoe UI", 8.5f) });
@@ -396,6 +646,14 @@ class App : Form
         navApps = NavBtn(T("Apps (beta)", "Aplikasi (beta)"), "", 292, PgApps);
         navLog = NavBtn("Log", "", 340, PgLog);
         side.Controls.AddRange(new Control[] { navWiz, navTool, navCheck, navUnlock, navApps, navLog });
+        // sidebar grouped as Home / Set up / Use, with Log at the bottom (names and positions are set here so the icon lines above stay untouched)
+        navHome = NavBtn(T("Home", "Utama"), "", 96, PgHome);
+        navWiz.Text = T("Install ROM", "Pasang ROM"); navCheck.Text = T("Check phone", "Semak telefon");
+        navUnlock.Top = 170; navCheck.Top = 214; navWiz.Top = 258; navApps.Top = 330; navTool.Top = 374;
+        side.Controls.Add(navHome);
+        side.Controls.Add(new Label { Text = T("Set up", "Persediaan"), Left = 20, Top = 148, AutoSize = true, ForeColor = SideMuted, Font = new Font("Segoe UI", 8.5f) });
+        side.Controls.Add(new Label { Text = T("Use", "Guna"), Left = 20, Top = 308, AutoSize = true, ForeColor = SideMuted, Font = new Font("Segoe UI", 8.5f) });
+        side.Resize += (s, e) => navLog.Top = side.Height - 256;
         follow = new CheckBox { Text = T("Auto-follow phone", "Ikut telefon auto"), Checked = true, AutoSize = true, Left = 16, ForeColor = SideText, BackColor = SideBg };
         var themeBtn = new RBtn { Text = Dark ? T("Light mode", "Mod cerah") : T("Dark mode", "Mod gelap"), Glyph = Dark ? "" : "", Left = 12, Width = 176, Height = 40, LeftText = true, Shift = SideShift, Fill = SideBg, Edge = SideEdge, Fore = SideText, GlyphColor = SideMuted };
         themeBtn.Click += (s, e) => SwitchSetting(ThemeFile, Dark ? "light" : "dark");
@@ -407,16 +665,17 @@ class App : Form
         // --- content ---
         var content = new Panel { Dock = DockStyle.Fill, BackColor = PageBg, Padding = new Padding(16) };
 
-        var statusCard = new Box { Dock = DockStyle.Top, Height = 136 };
-        statusIcon = new Label { Left = 16, Top = 14, Width = 40, Height = 40, TextAlign = ContentAlignment.MiddleCenter, ForeColor = Color.Gray,
-            Font = IconFont != null ? new Font(IconFont.FontFamily, 22f) : new Font("Segoe UI", 22f), Text = IconFont != null ? "" : "●" };
-        status = new Label { Left = 64, Top = 14, AutoSize = true, Font = new Font("Segoe UI", 13f, FontStyle.Bold), ForeColor = Ink };
-        info = new Label { Left = 66, Top = 44, AutoSize = true, ForeColor = Muted };
-        hint = new Label { Left = 66, Top = 72, AutoSize = true, ForeColor = Accent, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold) };
-        statusCard.Controls.AddRange(new Control[] { statusIcon, status, info, hint });
-        brand = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Top = 36, Width = 240 };
-        if (Dark) { brand.FlatStyle = FlatStyle.Flat; brand.BackColor = CardBg; brand.ForeColor = Ink; }
-        foreach (var p in Profiles) brand.Items.Add(p.Name);
+        // compact phone card: icon badge, "<phone> connected", one line of facts, and a state chip on the right
+        var statusCard = new Box { Dock = DockStyle.Top, Height = 84 };
+        statusIcon = new IconCircle { Left = 18, Top = 18, Width = 48, Height = 48 };
+        status = new Label { Left = 80, Top = 17, AutoSize = true, Font = new Font("Segoe UI", 13f, FontStyle.Bold), ForeColor = Ink };
+        info = new Label { Left = 82, Top = 47, AutoSize = true, ForeColor = Muted };
+        hint = new Label { AutoSize = true, ForeColor = Accent, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), Margin = new Padding(3, 0, 0, 8) };       // "Next: ..." on the Install ROM page
+        hintHome = new Label { AutoSize = true, ForeColor = Accent, Font = new Font("Segoe UI", 9.5f, FontStyle.Bold), Margin = new Padding(3, 0, 0, 8) };   // the same line on Home
+        statusChip = new Pill { Top = 29 };
+        statusCard.Controls.AddRange(new Control[] { statusIcon, status, info, statusChip });
+        statusCard.Resize += (s, e) => statusChip.Left = statusCard.Width - statusChip.Width - 20;
+        statusChip.SizeChanged += (s, e) => statusChip.Left = statusCard.Width - statusChip.Width - 20;
         int start = 0;
         try
         {
@@ -429,17 +688,17 @@ class App : Form
             }
         }
         catch (Exception) { }
-        brand.SelectedIndex = start;
-        var brandLbl = new Label { Text = T("Phone brand (auto-detect)", "Jenama telefon (auto-detect)"), Top = 14, AutoSize = true, ForeColor = Muted };
-        brandNote = new Label { Left = 66, Top = 102, AutoSize = true, MaximumSize = new Size(640, 0), ForeColor = Muted, Font = new Font("Segoe UI", 9f) };
-        brand.SelectedIndexChanged += (s, e) => { brandNote.Text = Prof().Note; BuildUnlock(); };
-        brandNote.Text = Prof().Note;
-        statusCard.Controls.Add(brandLbl); statusCard.Controls.Add(brand); statusCard.Controls.Add(brandNote);
-        statusCard.Resize += (s, e) => { brand.Left = statusCard.Width - 260; brandLbl.Left = brand.Left + 2; }; // always on the right
+        // the brand is detected automatically, so it is a quiet line with a Change link instead of a dropdown
+        brandChip = new BrandChip { Left = 12, Width = 176 };
+        brandChip.Click += (s, e) => ShowBrandMenu();
+        new ToolTip().SetToolTip(brandChip, T("Change the phone brand", "Tukar jenama telefon"));
+        side.Controls.Add(brandChip);
+        side.Resize += (s, e) => brandChip.Top = side.Height - 196;
+        SetBrand(start, "last");
 
-        wizPage = NewPage(out wizScroll); toolPage = NewPage(out toolScroll); checkPage = NewPage(out checkScroll); unlockPage = NewPage(out unlockScroll); appsPage = NewPage(out appsScroll);
+        wizPage = NewPage(out wizScroll); toolPage = NewPage(out toolScroll); checkPage = NewPage(out checkScroll); unlockPage = NewPage(out unlockScroll); appsPage = NewPage(out appsScroll); homePage = NewPage(out homeScroll);
         var pages = new Panel { Dock = DockStyle.Fill, BackColor = PageBg };
-        pages.Controls.Add(wizScroll); pages.Controls.Add(toolScroll); pages.Controls.Add(checkScroll); pages.Controls.Add(unlockScroll); pages.Controls.Add(appsScroll);
+        pages.Controls.Add(wizScroll); pages.Controls.Add(toolScroll); pages.Controls.Add(checkScroll); pages.Controls.Add(unlockScroll); pages.Controls.Add(appsScroll); pages.Controls.Add(homeScroll);
 
         logPage = new Panel { Dock = DockStyle.Fill, BackColor = PageBg, Visible = false };
         var logBar = new FlowLayoutPanel { Dock = DockStyle.Top, Height = 42, BackColor = PageBg };
@@ -459,6 +718,7 @@ class App : Form
         Controls.Add(content); Controls.Add(side);
 
         // --- LineageOS guide (the card for the current phone state is highlighted) ---
+        wizPage.Controls.Add(hint);
         var a = NewCard(wizPage, T("Enter Fastboot and recovery", "Masuk Fastboot dan recovery"), 1);
         Row(a, T("Reboot to Bootloader", "Reboot ke Bootloader"), "", () => Reboot("bootloader"), false);
         hRec = Row(a, "Flash recovery.img", "", FlashRecovery, true);
@@ -467,20 +727,22 @@ class App : Form
         Note(a, T("Files are looked up in the 'Rom' folder. Use 'Boot temporarily' if Volume Up + Power does not enter recovery.",
                   "Fail dicari dalam folder 'Rom'. Guna 'Boot sementara' kalau Volume Up + Power tak masuk recovery."));
         var b = NewCard(wizPage, T("On the phone (in recovery)", "Pada telefon (dalam recovery)"), 2);
-        Note(b, T("Factory Reset > Format data, then Apply update > Apply from ADB.", "Factory Reset > Format data, kemudian Apply update > Apply from ADB."));
+        // the one step done on the phone itself: two short lines in full-strength text so it is not skipped
+        foreach (var ln in new[] { T("1.  Factory Reset > Format data", "1.  Factory Reset > Format data"), T("2.  Apply update > Apply from ADB", "2.  Apply update > Apply from ADB") })
+            b.Controls.Add(new Label { Text = ln, AutoSize = true, ForeColor = Ink, Font = new Font("Segoe UI", 10.5f), UseMnemonic = false, Margin = new Padding(0, 2, 0, 2) });
         var c = NewCard(wizPage, T("Install ROM, then GApps", "Pasang ROM, kemudian GApps"), 3);
         var selRow = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 0, 0, 4) };
         selRow.Controls.Add(new Label { Text = "ROM:", AutoSize = true, ForeColor = Muted, Margin = new Padding(0, 6, 8, 0) });
-        romSel = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
-        if (Dark) { romSel.FlatStyle = FlatStyle.Flat; romSel.BackColor = CardBg; romSel.ForeColor = Ink; }
-        foreach (var ro in Roms) romSel.Items.Add(ro.Name);
+        romSel = new Seg();
+        var romNames = new List<string>(); foreach (var ro in Roms) romNames.Add(ro.Name);
+        romSel.SetItems(romNames.ToArray());
         int rs = 0;
         try { if (File.Exists(RomFile)) int.TryParse(File.ReadAllText(RomFile).Trim(), out rs); } catch (Exception) { }
         romSel.SelectedIndex = rs >= 0 && rs < Roms.Length ? rs : 0;
         selRow.Controls.Add(romSel); c.Controls.Add(selRow);
-        romNote = new Label { AutoSize = true, MaximumSize = new Size(640, 0), ForeColor = Muted, UseMnemonic = false, Margin = new Padding(0, 0, 0, 6), Text = Roms[romSel.SelectedIndex].Note };
+        romNote = new Label { AutoSize = true, MaximumSize = new Size(700, 0), ForeColor = Muted, UseMnemonic = false, Margin = new Padding(0, 0, 0, 6), Text = Roms[romSel.SelectedIndex].Note };
         c.Controls.Add(romNote);
-        romSel.SelectedIndexChanged += (s, e) =>
+        romSel.Changed += (s, e) =>
         {
             romNote.Text = Roms[romSel.SelectedIndex].Note;
             try { File.WriteAllText(RomFile, romSel.SelectedIndex.ToString()); } catch (Exception) { }
@@ -503,6 +765,7 @@ class App : Form
         Tile(r2, T("Sideload .zip file", "Sideload fail .zip"), T("Install a ROM or add-on", "Pasang ROM atau add-on"), "", () => SideloadAuto(null), false);
         Tile(r2, T("Check file MD5", "Semak MD5 fail"), T("Verify a downloaded file", "Semak fail yang dimuat turun"), "", Md5, false);
         Tile(r2, T("Flash several images", "Flash beberapa imej"), T("In order, stops on error", "Ikut urutan, henti ralat"), "", FlashMany, false);
+        foreach (Control rc in r1.Controls) rc.Height = 54;   // rarely used: lower tiles, so the everyday ones below stand out
         var r6 = ToolCard(toolPage, T("Phone tools (phone on, USB debugging)", "Alat telefon (telefon hidup, USB debugging)"));
         Tile(r6, T("Install APK", "Pasang APK"), T("Install an app from the PC", "Pasang app dari PC"), "", InstallApk, false);
         Tile(r6, T("Screenshot", "Tangkapan skrin"), T("Saved in Pictures", "Disimpan dalam Pictures"), "", Screenshot, false);
@@ -514,7 +777,8 @@ class App : Form
         Tile(r7, "LineageOS", T("Official builds", "Binaan rasmi"), "", LineageDownloads, false);
         Tile(r7, "GApps", T("MindTheGapps list", "Senarai MindTheGapps"), "", () => OpenUrl("https://wiki.lineageos.org/gapps/"), false);
         Tile(r7, T("Stock ROM page", "Halaman ROM asal"), T("Xiaomi / Pixel", "Xiaomi / Pixel"), "", StockPage, false);
-        Tile(r7, T("Find ROMs for this phone", "Cari ROM untuk telefon ini"), T("Web search for your model", "Carian web untuk model awak"), "", FindRoms, false);
+        Tile(r7, T("Find ROMs", "Cari ROM"), T("Web search for your phone", "Carian web untuk telefon awak"), "", FindRoms, false);
+        foreach (Control rc in r7.Controls) rc.Height = 54;
         var r3 = ToolCard(toolPage, T("Stock Xiaomi ROM (extracted fastboot ROM)", "ROM asal Xiaomi (fastboot ROM yang sudah di-extract)"));
         Tile(r3, T("Install - keep data", "Pasang - simpan data"), T("Restore stock, keep files", "Pulih ROM asal, simpan fail"), "", () => FastbootRom("flash_all_except_storage.bat", null), false);
         Tile(r3, T("Install - wipe all", "Pasang - padam semua"), T("Restore stock, erase all", "Pulih ROM asal, padam semua"), "", () => FastbootRom("flash_all.bat", WipeWord), true);
@@ -558,44 +822,39 @@ class App : Form
             var bd = new Badge(n); bd.Margin = new Padding(0, 0, 6, 0); steps.Controls.Add(bd);
             steps.Controls.Add(new Label { Text = txt, AutoSize = true, ForeColor = Ink, UseMnemonic = false, Margin = new Padding(0, 4, 22, 0) });
         };
-        stepOf(1, T("Load apps", "Muat aplikasi"));
+        stepOf(1, T("Wait for the list", "Tunggu senarai"));
         stepOf(2, T("Tick the ones you do not need", "Tandakan yang tak perlu"));
         stepOf(3, T("Press Disable", "Tekan Lumpuhkan"));
         guide.Controls.Add(steps);
-        Note(guide, T("Changed your mind? Choose 'Disabled apps' in the list, tick the app and press Enable. 'Remove' uninstalls instead: it works for apps you installed yourself, but system apps usually need root. Not sure what an app is? Click it and press Search online. Change one or two at a time, restart the phone, and check that everything still works. The colours are general advice, not a guarantee.",
-                   "Berubah fikiran? Pilih 'Aplikasi dilumpuhkan' dalam senarai, tandakan aplikasi dan tekan Hidupkan. 'Buang' menyahpasang: ia berfungsi untuk aplikasi yang awak pasang sendiri, tetapi aplikasi sistem biasanya perlu root. Tak pasti apa aplikasi itu? Klik dan tekan Cari maklumat. Ubah satu atau dua sahaja, mulakan semula telefon, dan semak semuanya masih berfungsi. Warna ialah nasihat umum, bukan jaminan."));
-        var apBar = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 8, 0, 6) };
-        appFilter = new ComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 170, Margin = new Padding(0, 6, 8, 0) };
-        appFilter.Items.AddRange(new object[] { T("User apps", "Aplikasi pengguna"), T("System apps", "Aplikasi sistem"), T("All apps", "Semua aplikasi"), T("Disabled apps", "Aplikasi dilumpuhkan") });
-        appFilter.SelectedIndex = AutoFilter >= 0 && AutoFilter < appFilter.Items.Count ? AutoFilter : 0;
-        appSearch = new TextBox { Width = 200, Margin = new Padding(8, 8, 8, 0) };
-        if (Dark) { appFilter.FlatStyle = FlatStyle.Flat; appFilter.BackColor = CardBg; appFilter.ForeColor = Ink; appSearch.BackColor = CardBg; appSearch.ForeColor = Ink; }
+        Note(guide, T("Changed your mind? Open the Disabled tab, tick the app and press Enable. 'Remove' (under More) uninstalls instead: it works for apps you installed yourself, but system apps usually need root. Not sure what an app is? Click it, then More > Search online. Change one or two at a time, restart the phone, and check that everything still works. The group headings are general advice, not a guarantee.",
+                   "Berubah fikiran? Buka tab Dilumpuhkan, tandakan aplikasi dan tekan Hidupkan. 'Buang' (di bawah Lagi) menyahpasang: ia berfungsi untuk aplikasi yang awak pasang sendiri, tetapi aplikasi sistem biasanya perlu root. Tak pasti apa aplikasi itu? Klik, kemudian Lagi > Cari maklumat. Ubah satu atau dua sahaja, mulakan semula telefon, dan semak semuanya masih berfungsi. Tajuk kumpulan ialah nasihat umum, bukan jaminan."));
+        var apBar = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0, 8, 0, 6) };
+        appFilter = new Seg { Margin = new Padding(0, 2, 12, 0) };
+        appFilter.SetItems(T("Your apps", "Aplikasi awak"), T("System", "Sistem"), T("All", "Semua"), T("Disabled", "Dilumpuhkan"));
+        if (AutoFilter >= 0 && AutoFilter < appFilter.Count) appFilter.SelectedIndex = AutoFilter;
+        appFilter.Changed += (s, e) => { if (state == "device") LoadApps(); else FillApps(); };   // a different list type means a different list from the phone
+        appSearch = new TextBox { Width = 140, Margin = new Padding(0, 7, 10, 0) };
+        if (Dark) { appSearch.BackColor = CardBg; appSearch.ForeColor = Ink; }
+        appSearch.HandleCreated += (s, e) => SendMessage(appSearch.Handle, 0x1501, (IntPtr)1, T("Search apps", "Cari aplikasi"));   // placeholder text
         appSearch.TextChanged += (s, e) => FillApps();
         apBar.Controls.Add(appFilter);
-        apBar.Controls.Add(Btn(T("Load apps", "Muat aplikasi"), "", LoadApps, 1, 160));
-        apBar.Controls.Add(new Label { Text = T("Filter:", "Tapis:"), AutoSize = true, ForeColor = Muted, Margin = new Padding(8, 11, 0, 0) });
         apBar.Controls.Add(appSearch);
+        apBar.Controls.Add(Btn(T("Reload", "Muat semula"), "", LoadApps, 0, 132));
         ap.Controls.Add(apBar);
-        appHideBg = new CheckBox { Text = T("Hide background parts (recommended)", "Sembunyi bahagian latar (disyorkan)"), Checked = true, AutoSize = true, ForeColor = Ink, Margin = new Padding(0, 0, 0, 6) };
-        appHideBg.CheckedChanged += (s, e) => FillApps();
-        ap.Controls.Add(appHideBg);
-        appList = new ListView { View = View.Details, CheckBoxes = true, FullRowSelect = true, HeaderStyle = ColumnHeaderStyle.Nonclickable, Width = 655, Height = 240, BorderStyle = BorderStyle.FixedSingle, BackColor = CardBg, ForeColor = Ink, Margin = new Padding(0, 0, 0, 6) };
-        appList.Columns.Add(T("Package", "Pakej"), 280); appList.Columns.Add(T("What it is", "Apa ia"), 170); appList.Columns.Add(T("Advice", "Nasihat"), 180);
+        appList = new AppList { Width = 690, Height = 320, Margin = new Padding(0, 4, 0, 10), Empty = T("Connect the phone and its apps load here.\nPress Reload if nothing shows up.", "Sambung telefon dan aplikasinya dimuat di sini.\nTekan Muat semula kalau tiada apa dipaparkan.") };
+        appList.Changed += (s, e) => { appNote = ""; UpdateAppBar(); };
+        appsScroll.ClientSizeChanged += (s, e) => appList.Height = Math.Max(160, Math.Min(440, appsScroll.ClientSize.Height - 340));   // short windows: a shorter list, so the buttons below stay in view
         ap.Controls.Add(appList);
-        var legend = new FlowLayoutPanel { AutoSize = true, WrapContents = true, MaximumSize = new Size(655, 0), Margin = new Padding(0, 0, 0, 4) };
-        Action<Color, string> key = (col, txt) => legend.Controls.Add(new Label { Text = "● " + txt, AutoSize = true, ForeColor = col, UseMnemonic = false, Margin = new Padding(0, 0, 14, 0) });
-        key(Color.SeaGreen, T("Safe to disable", "Selamat dilumpuhkan")); key(Color.SteelBlue, T("Optional app", "Aplikasi pilihan")); key(Color.DarkOrange, T("Careful", "Hati-hati"));
-        key(Color.Firebrick, T("Core (protected)", "Teras (dilindungi)")); key(Color.SlateBlue, T("Installed by you", "Dipasang oleh awak"));
-        key(Muted, T("Unknown, has an icon", "Tak diketahui, ada ikon")); key(Color.Sienna, T("Background part: leave it", "Bahagian latar: biarkan"));
-        ap.Controls.Add(legend);
-        appCount = new Label { Text = T("Press 'Load apps' (the phone must be on, USB debugging allowed).", "Tekan 'Muat aplikasi' (telefon mesti hidup, USB debugging dibenarkan)."), AutoSize = true, ForeColor = Muted, Margin = new Padding(0, 0, 0, 8) };
-        ap.Controls.Add(appCount);
-        var apRow = ToolRow(ap);
-        apRow.Controls.Add(Btn(T("Disable ticked apps", "Lumpuhkan yang ditanda"), "", () => DisableApps(false), 1, 210));
-        apRow.Controls.Add(Btn(T("Enable ticked apps", "Hidupkan yang ditanda"), "", () => DisableApps(true), 0, 210));
-        apRow.Controls.Add(Btn(T("Search online", "Cari maklumat"), "", SearchApp, 0, 210));
-        apRow.Controls.Add(Btn(T("Remove ticked apps", "Buang aplikasi ditanda"), "", UninstallApps, 2, 210));
-        apRow.Controls.Add(Btn(T("Restore by name", "Pulihkan ikut nama"), "", RestoreApp, 0, 210));
+        var apRow = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0) };
+        appCount = new Label { AutoSize = true, MaximumSize = new Size(700, 0), ForeColor = Muted, UseMnemonic = false, Margin = new Padding(3, 0, 0, 8) };
+        ap.Controls.Add(appCount);   // the count line sits above the buttons, so the buttons never wrap on a narrow window
+        apRow.Controls.Add(Btn(T("Enable", "Hidupkan"), "", () => DisableApps(true), 0, 110));
+        btnDisable = Btn(T("Disable", "Lumpuhkan"), "", () => DisableApps(false), 1, 170);
+        apRow.Controls.Add(btnDisable);
+        appMore = Btn(T("More", "Lagi"), "", () => ShowAppsMenu(), 0, 90);
+        apRow.Controls.Add(appMore);
+        ap.Controls.Add(apRow);
+        UpdateAppBar();
 
         if (DemoApps)   // --demo-apps: fill the list with sample packages so the layout can be checked without a phone
         {
@@ -603,6 +862,29 @@ class App : Form
             UserPkgs = new HashSet<string> { "com.brave.browser" }; LauncherPkgs = new HashSet<string> { "com.android.dialer" };
             FillApps();
         }
+        // --- Home: where to start ---
+        homePage.Controls.Add(hintHome);
+        var hc = NewCard(homePage, T("What do you want to do?", "Apa yang awak mahu buat?"), 0);
+        Note(hc, T("Pick one. Flash Deck checks the phone before it changes anything.", "Pilih satu. Flash Deck menyemak telefon sebelum mengubah apa-apa."));
+        var grid = new FlowLayoutPanel { AutoSize = true, MaximumSize = new Size(660, 0), Margin = new Padding(0, 8, 0, 0), Tag = 2 };
+        Action<string, string, string, int> pick = (title, sub, glyph, page) =>
+        {
+            var hb = new RBtn { Text = title, Sub = sub, Glyph = glyph, Tile = true, Width = 322, Height = 84, Font = Font, GlyphColor = Accent };
+            hb.Click += (s, e) => Nav(page);
+            grid.Controls.Add(hb);
+        };
+        pick(T("Install a ROM", "Pasang ROM"), T("Step by step, with checks", "Langkah demi langkah, dengan semakan"), "", PgGuide);
+        pick(T("Hide apps you do not use", "Sembunyi aplikasi tak digunakan"), T("Reversible, no root", "Boleh dibalikkan, tanpa root"), "", PgApps);
+        pick(T("Unlock the bootloader", "Unlock bootloader"), T("A guide for your brand", "Panduan untuk jenama awak"), "", PgUnlock);
+        pick(T("Phone tools", "Alat telefon"), T("Screenshot, copy files, battery", "Tangkapan skrin, salin fail, bateri"), "", PgTools);
+        hc.Controls.Add(grid);
+        hc.SizeChanged += (s, e) => FitTiles(hc, grid);
+        var checkFirst = new RBtn { Text = T("Check my phone first", "Semak telefon saya dahulu"), Glyph = "", Width = 250, Height = 38, Font = Font, GlyphColor = Accent, Margin = new Padding(3, 12, 0, 0) };
+        checkFirst.Click += (s, e) => Nav(PgCheck);
+        hc.Controls.Add(checkFirst);
+        homeLast = new Label { AutoSize = true, ForeColor = Muted, UseMnemonic = false, Margin = new Padding(3, 10, 0, 0) };
+        hc.Controls.Add(homeLast);
+
         BuildUnlock();
         Nav(StartPage);
         ShowState("none", "");
@@ -633,8 +915,33 @@ class App : Form
     FlowLayoutPanel NewPage(out Panel scroll)
     {
         var flow = new FlowLayoutPanel { FlowDirection = FlowDirection.TopDown, WrapContents = false, AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, BackColor = PageBg, Location = new Point(0, 0) };
-        scroll = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = PageBg };
-        scroll.Controls.Add(flow);
+        var sc = new Panel { Dock = DockStyle.Fill, AutoScroll = true, BackColor = PageBg };
+        sc.Controls.Add(flow);
+        // cards stretch to the width of the page, so they line up with the phone card above them
+        int lastW = 0;
+        Action stretch = () =>
+        {
+            int w = Math.Max(300, sc.ClientSize.Width);
+            flow.MaximumSize = new Size(w, 0);   // never wider than the page, so no sideways scrollbar
+            lastW = w;
+            if (sc.IsHandleCreated) ShowScrollBar(sc.Handle, 0, false);   // pages never scroll sideways (the cards always fit the width)
+            foreach (Control c in flow.Controls)
+            {
+                var cd = c as Card; if (cd == null) continue;
+                cd.MinimumSize = new Size(w, 0);
+                int inner = Math.Max(300, w - cd.Padding.Horizontal);
+                foreach (Control k in cd.Controls)
+                {
+                    var fp = k as FlowLayoutPanel; if (fp != null) FitTiles(cd, fp);
+                    var al = k as AppList; if (al != null) al.Width = Math.Max(480, inner);   // the app list follows the card
+                    var lb = k as Label; if (lb != null && lb.AutoSize && lb.MaximumSize.Width > 0) lb.MaximumSize = new Size(inner, 0);   // notes wrap inside the card
+                }
+            }
+        };
+        sc.ClientSizeChanged += (s, e) => stretch();
+        sc.Layout += (s, e) => { if (sc.IsHandleCreated) ShowScrollBar(sc.Handle, 0, false); };
+        flow.ControlAdded += (s, e) => stretch();
+        scroll = sc;
         return flow;
     }
 
@@ -648,14 +955,18 @@ class App : Form
     void Nav(int i)
     {
         curPage = i;
-        wizScroll.Visible = i == PgGuide; toolScroll.Visible = i == PgTools; checkScroll.Visible = i == PgCheck; unlockScroll.Visible = i == PgUnlock; appsScroll.Visible = i == PgApps; logPage.Visible = i == PgLog;
+        if (i == PgApps && !appLoaded && !appAutoTried && !DemoApps && state == "device" && !busy) { appAutoTried = true; LoadApps(); }   // the list loads itself the first time
+        homeScroll.Visible = i == PgHome; wizScroll.Visible = i == PgGuide; toolScroll.Visible = i == PgTools; checkScroll.Visible = i == PgCheck; unlockScroll.Visible = i == PgUnlock; appsScroll.Visible = i == PgApps; logPage.Visible = i == PgLog;
         wizScroll.AutoScrollPosition = new Point(0, 0); toolScroll.AutoScrollPosition = new Point(0, 0); checkScroll.AutoScrollPosition = new Point(0, 0);
-        var navs = new[] { navWiz, navTool, navCheck, navUnlock, navApps, navLog };
+        var navs = new RBtn[7];   // indexed by page number
+        navs[PgHome] = navHome; navs[PgGuide] = navWiz; navs[PgTools] = navTool; navs[PgCheck] = navCheck; navs[PgUnlock] = navUnlock; navs[PgApps] = navApps; navs[PgLog] = navLog;
         for (int k = 0; k < navs.Length; k++)
         {
             bool on = k == i;
-            navs[k].Fill = on ? Accent : SideBg; navs[k].Edge = navs[k].Fill; navs[k].Fore = on ? Color.White : SideText;
-            navs[k].GlyphColor = on ? Color.White : SideMuted; navs[k].Invalidate();
+            // light theme: soft blue pill with blue text; dark theme keeps the solid accent
+            Color onFill = Dark ? Accent : Color.FromArgb(204, 225, 252), onFore = Dark ? Color.White : Color.FromArgb(29, 78, 216);
+            navs[k].Fill = on ? onFill : SideBg; navs[k].Edge = navs[k].Fill; navs[k].Fore = on ? onFore : SideText;
+            navs[k].GlyphColor = on ? onFore : SideMuted; navs[k].Invalidate();
         }
     }
 
@@ -674,12 +985,23 @@ class App : Form
     {
         var row = new FlowLayoutPanel { AutoSize = true, AutoSizeMode = AutoSizeMode.GrowAndShrink, MaximumSize = new Size(660, 0), Margin = new Padding(0) };
         card.Controls.Add(row);
+        card.SizeChanged += (s, e) => FitTiles(card, row);   // tiles share the card's width, three to a line
         return row;
+    }
+
+    void FitTiles(Control card, FlowLayoutPanel row)
+    {
+        int inner = card.MinimumSize.Width - card.Padding.Horizontal;   // the width the page gives the card, not what its content happens to need
+        if (inner < 300) return;
+        int cols = row.Tag is int ? (int)row.Tag : 3;   // tiles per line (Home uses two)
+        int w = (inner - cols * 6) / cols;
+        row.MaximumSize = new Size(inner, 0);
+        foreach (Control c in row.Controls) { var b = c as RBtn; if (b != null && b.Tile && b.Width != w) b.Width = w; }
     }
 
     FlowLayoutPanel ToolCard(Control page, string title) { return ToolRow(NewCard(page, title, 0)); }
 
-    void Note(Control p, string s) { p.Controls.Add(new Label { Text = s, AutoSize = true, MaximumSize = new Size(640, 0), ForeColor = Muted, UseMnemonic = false, Margin = new Padding(0, 4, 0, 2) }); }
+    void Note(Control p, string s) { p.Controls.Add(new Label { Text = s, AutoSize = true, MaximumSize = new Size(700, 0), ForeColor = Muted, UseMnemonic = false, Margin = new Padding(0, 4, 0, 2) }); }
 
     // style: 0 normal, 1 primary (blue), 2 danger (red)
     RBtn Btn(string text, string glyph, Action act, int style, int width)
@@ -710,7 +1032,7 @@ class App : Form
     {
         var r = new FlowLayoutPanel { AutoSize = true, WrapContents = false, Margin = new Padding(0, 2, 0, 2) };
         var h = new Label { AutoSize = true, ForeColor = Muted, Margin = new Padding(8, 11, 0, 0), UseMnemonic = false };
-        r.Controls.Add(Btn(text, glyph, act, primary ? 1 : 0, 230)); r.Controls.Add(h); p.Controls.Add(r);
+        r.Controls.Add(Btn(text, glyph, act, primary ? 1 : 0, 300)); r.Controls.Add(h); p.Controls.Add(r);
         return h;
     }
 
@@ -802,14 +1124,14 @@ class App : Form
         return sb.ToString();
     }
 
-    void Run(string title, Action a)
+    void Run(string title, Action a, bool stay = false)   // stay: keep the current page (the Apps page shows its own result line)
     {
         if (busy) return;
-        busy = true; SetEnabled(false); prog.Visible = true; Nav(PgLog); Log("> " + title);   // show the Log tab when a task starts
+        busy = true; SetEnabled(false); prog.Visible = true; if (!stay) Nav(PgLog); Log("> " + title);   // show the Log tab when a task starts
         new Thread(() =>
         {
             try { a(); } catch (Exception ex) { Log(T("ERROR: ", "RALAT: ") + ex.Message); }
-            busy = false; Ui(() => { SetEnabled(true); prog.Visible = false; RefreshHints(); }); Log(T("Done.", "Selesai.") + "\r\n");
+            busy = false; Ui(() => { SetEnabled(true); prog.Visible = false; RefreshHints(); homeLast.Text = T("Last action: ", "Tindakan terakhir: ") + title + " (" + DateTime.Now.ToString("HH:mm") + ")"; }); Log(T("Done.", "Selesai.") + "\r\n");
         }) { IsBackground = true }.Start();
     }
 
@@ -842,12 +1164,19 @@ class App : Form
         }
         if (st == "device" || st == "recovery")
         {
-            var v = new List<string>();
-            foreach (var l in Exec(Adb, "shell \"getprop ro.product.model; getprop ro.build.version.release; getprop ro.product.manufacturer; getprop ro.product.device; getprop ro.build.flavor\"", null, false, 5000).Split('\n'))
-                if (l.Trim() != "") v.Add(l.Trim());
-            if (v.Count >= 4)
+            // every value is labelled (name=value), so an empty property can not shift the others
+            var pr = new Dictionary<string, string>();
+            foreach (var l in Exec(Adb, "shell \"for p in ro.product.model ro.build.version.release ro.product.manufacturer ro.product.device ro.build.flavor ro.boot.verifiedbootstate ro.lineage.version; do echo $p=$(getprop $p); done\"", null, false, 5000).Split('\n'))
             {
-                mfr = v[2]; dev = v[3]; if (v.Count >= 5) rom = v[4];
+                int eq = l.IndexOf('=');
+                if (eq > 0) pr[l.Substring(0, eq).Trim()] = l.Substring(eq + 1).Trim();
+            }
+            Func<string, string> gp = k => pr.ContainsKey(k) ? pr[k] : "";
+            var v = new List<string> { gp("ro.product.model"), gp("ro.build.version.release"), gp("ro.product.manufacturer"), gp("ro.product.device"), gp("ro.build.flavor") };
+            lastProps = pr;
+            if (v[0] != "" && v[2] != "" && v[3] != "")
+            {
+                mfr = v[2]; dev = v[3]; rom = v[4];
                 detail = v[2] + " " + v[0] + " (" + v[3] + ")  ·  Android " + v[1];
             }
         }
@@ -878,11 +1207,13 @@ class App : Form
                     ShowState(st, detail, rom);
                     if (mfr != "")
                     {
-                        brand.SelectedIndex = ProfileIndex(mfr); codename = dev;
+                        if (brandSrc != "manual") SetBrand(ProfileIndex(mfr), "auto");   // a brand you picked yourself is kept
+                        codename = dev;
                         int cut = detail.IndexOf("  ·"); if (cut > 0) phoneName = detail.Substring(0, cut);
                         try { File.WriteAllText(LastFile, mfr + "\n" + dev + "\n" + phoneName); } catch (Exception) { }
                     }
                     else if (st == "fastboot" && dev != "") codename = dev;
+                    if (mfr == "" && brandSrc == "auto") SetBrand(brandIdx, "last");   // fastboot gives no brand: it is now only the last known one
                     // follow the phone: when it enters fastboot / recovery / sideload, show the matching guide step (never presses anything)
                     if (st != lastSt)
                     {
@@ -916,7 +1247,7 @@ class App : Form
             case "device": c = Color.SeaGreen; g = ""; t = T("Connected (system)", "Disambung (sistem)"); i = detail;
                 h = T("Next: Reboot to Bootloader (step 1)", "Seterusnya: Reboot ke Bootloader (langkah 1)");
                 if (cr != "")   // already installed: do not send the user back to step 1
-                { h = string.Format(T("Done: the phone already runs {0}. Use step 1 only to install a different ROM.", "Siap: telefon sudah guna {0}. Guna langkah 1 hanya untuk pasang ROM lain."), cr); step = 3; }
+                { h = string.Format(T("Done: the phone already runs {0}. Open Install ROM only to install a different ROM.", "Siap: telefon sudah guna {0}. Buka Pasang ROM hanya untuk pasang ROM lain."), cr); step = 3; }
                 break;
             case "recovery": c = Color.SteelBlue; g = ""; t = T("Recovery mode", "Mod Recovery"); i = T("Choose Apply update > Apply from ADB to sideload.", "Pilih Apply update > Apply from ADB untuk sideload.");
                 h = T("Next: Format data, then Apply from ADB (step 2)", "Seterusnya: Format data, kemudian Apply from ADB (langkah 2)"); step = 1; break;
@@ -928,13 +1259,29 @@ class App : Form
                 h = T("Next: accept the USB debugging prompt on the phone", "Seterusnya: terima prompt USB debugging pada telefon"); break;
         }
         curStep = step;
+        if (st == "device" && detail != "")   // "Xiaomi M2007J3SY connected" and one line of facts
+        {
+            int pi = detail.IndexOf(" (");
+            t = string.Format(T("{0} connected", "{0} disambung"), pi > 0 ? detail.Substring(0, pi) : detail);
+            var facts = new List<string>();
+            if (cr != "") { string lv = PropOf("ro.lineage.version"); facts.Add(cr == "LineageOS" && lv != "" ? "LineageOS " + lv.Split('-')[0] : cr); }
+            var am = Regex.Match(detail, @"Android (\S+)"); if (am.Success) facts.Add("Android " + am.Groups[1].Value);
+            string vb = PropOf("ro.boot.verifiedbootstate");
+            if (vb == "orange") facts.Add(T("bootloader unlocked", "bootloader unlock")); else if (vb == "green") facts.Add(T("bootloader locked", "bootloader terkunci"));
+            i = string.Join("  ·  ", facts.ToArray());
+        }
         statusIcon.ForeColor = c; if (IconFont != null) statusIcon.Text = g;
-        status.Text = t; info.Text = i; hint.Text = h;
+        status.Text = t; info.Text = i; hint.Text = h; hintHome.Text = h;
+        statusChip.Set(st == "device" ? T("Ready", "Sedia") : st == "recovery" || st == "sideload" ? T("In recovery", "Dalam recovery") : st == "fastboot" ? "Fastboot"
+                       : st == "unauthorized" ? T("Allow on phone", "Benarkan pada telefon") : T("Not connected", "Tak disambung"), c);
         for (int k = 0; k < wizCards.Count; k++)
         {
             bool on = st != "none" && k == step;
             if (wizCards[k].Active != on) { wizCards[k].Active = on; wizCards[k].Invalidate(); }
         }
+        // the Apps list loads itself once the phone shows up (one try per connection, so a failure does not pop up a message every poll)
+        if (st != "device") appAutoTried = false;
+        else if (curPage == PgApps && !appLoaded && !appAutoTried && !busy && !DemoApps) { appAutoTried = true; LoadApps(); }
     }
 
     // ---------- pre-flight check ----------
@@ -1116,32 +1463,72 @@ class App : Form
         return s;
     }
 
-    static ListViewItem MakeAppItem(string p)
+    // what the app is, in words (from the built-in hints); empty when we only know the package name
+    static string AppDesc(string p, string kind)
     {
-        string kind = AppKind(p), desc = "", tag; Color c;
-        string[] h; if (AppHints.TryGetValue(p, out h)) desc = T(h[1], h[2]); else if (HomePkgs.Contains(p)) desc = T("Home screen (launcher)", "Skrin utama (launcher)");
-        else if (kind == "core") desc = T("System component", "Komponen sistem");
+        string[] h; if (AppHints.TryGetValue(p, out h)) return T(h[1], h[2]);
+        if (HomePkgs.Contains(p)) return T("Home screen (launcher)", "Skrin utama (launcher)");
+        return kind == "core" ? T("System component", "Komponen sistem") : "";
+    }
+
+    static string KindLabel(string kind)
+    {
         switch (kind)
         {
-            case "safe": tag = T("Safe to disable", "Selamat dilumpuhkan"); c = Color.SeaGreen; break;
-            case "optional": tag = T("Optional app", "Aplikasi pilihan"); c = Color.SteelBlue; break;
-            case "careful": tag = T("Careful", "Hati-hati"); c = Color.DarkOrange; break;
-            case "core": tag = T("Core (protected)", "Teras (dilindungi)"); c = Color.Firebrick; break;
-            case "yours": tag = T("Installed by you", "Dipasang oleh awak"); c = Color.SlateBlue; break;
-            case "gapps": tag = T("Google part: careful", "Bahagian Google: hati-hati"); c = Color.DarkOrange; break;
-            case "sysicon": tag = T("Unknown (has an icon)", "Tak diketahui (ada ikon)"); c = Muted; break;
-            case "sysbg": tag = T("Background: leave it", "Latar: biarkan"); c = Color.Sienna; break;
-            default: tag = T("Unknown", "Tak diketahui"); c = Muted; break;
+            case "safe": return T("Safe to disable", "Selamat dilumpuhkan");
+            case "optional": return T("Optional app", "Aplikasi pilihan");
+            case "careful": return T("Careful", "Hati-hati");
+            case "core": return T("Core (protected)", "Teras (dilindungi)");
+            case "yours": return T("Installed by you", "Dipasang oleh awak");
+            case "gapps": return T("Google part: careful", "Bahagian Google: hati-hati");
+            case "sysicon": return T("Unknown (has an icon)", "Tak diketahui (ada ikon)");
+            case "sysbg": return T("Background: leave it", "Latar: biarkan");
+            default: return T("Unknown", "Tak diketahui");
         }
-        var it = new ListViewItem(p) { UseItemStyleForSubItems = false };
-        it.SubItems.Add(desc);
-        it.SubItems.Add(tag).ForeColor = c;
-        return it;
+    }
+
+    static Color[] GroupColors { get { return new[] { Color.SeaGreen, Color.SteelBlue, Color.DarkOrange, Color.SlateBlue, Muted, Color.Sienna, Color.Firebrick }; } }
+
+    // the count line and the Disable button follow what is ticked
+    void UpdateAppBar()
+    {
+        int n = appList.CheckedPkgs().Count;
+        btnDisable.Text = n == 1 ? T("Disable 1 app", "Lumpuhkan 1 aplikasi") : n > 1 ? string.Format(T("Disable {0} apps", "Lumpuhkan {0} aplikasi"), n) : T("Disable", "Lumpuhkan"); btnDisable.Invalidate();
+        int shown = appList.AppCount;
+        appCount.Text = appNote != "" ? appNote
+            : (n > 0 ? string.Format(T("{0} selected · ", "{0} dipilih · "), n) : "") + (shown == 1 ? T("1 app shown", "1 aplikasi dipaparkan") : string.Format(T("{0} apps shown", "{0} aplikasi dipaparkan"), shown)) + appHiddenNote;
+    }
+
+    // a pop-up menu in the app's colours, with soft corners
+    ContextMenuStrip NewMenu()
+    {
+        var m = new ContextMenuStrip { ShowImageMargin = false, ShowCheckMargin = false, Font = Font, BackColor = CardBg, ForeColor = Ink, Padding = new Padding(4), Renderer = new ToolStripProfessionalRenderer(new MenuColors()) };
+        m.Opened += (s, e) => { using (var p = RBtn.Round(new Rectangle(0, 0, m.Width, m.Height), 16)) m.Region = new Region(p); };
+        m.Closed += (s, e) => BeginInvoke(new Action(() => m.Dispose()));
+        return m;
+    }
+
+    ToolStripMenuItem MenuItem(ContextMenuStrip m, string text, Action act, Color fore)
+    {
+        var it = new ToolStripMenuItem(text) { ForeColor = fore, Padding = new Padding(2, 4, 2, 4) };
+        it.Click += (s, e) => act(); m.Items.Add(it); return it;
+    }
+
+    void ShowAppsMenu()
+    {
+        var m = NewMenu();
+        MenuItem(m, "      " + T("Search online", "Cari maklumat"), SearchApp, Ink);
+        MenuItem(m, "      " + T("Restore by name", "Pulihkan ikut nama"), RestoreApp, Ink);
+        MenuItem(m, (appShowBg ? "✓   " : "      ") + T("Show background parts", "Tunjuk bahagian latar"), () => { appShowBg = !appShowBg; FillApps(); }, Ink);
+        m.Items.Add(new ToolStripSeparator());
+        MenuItem(m, "      " + T("Remove ticked apps", "Buang aplikasi ditanda"), UninstallApps, DangerC);
+        m.Show(appMore.PointToScreen(new Point(appMore.Width - m.GetPreferredSize(Size.Empty).Width, -m.GetPreferredSize(Size.Empty).Height - 6)));
     }
 
     void SearchApp()
     {
-        string p = appList.SelectedItems.Count > 0 ? appList.SelectedItems[0].Text : appList.CheckedItems.Count > 0 ? appList.CheckedItems[0].Text : null;
+        string p = appList.Selected;
+        if (p == null) { var c = appList.CheckedPkgs(); if (c.Count > 0) p = c[0]; }
         if (p == null) { MessageBox.Show(T("Click an app in the list first.", "Klik satu aplikasi dalam senarai dahulu."), Cap); return; }
         OpenUrl("https://www.google.com/search?q=" + Uri.EscapeDataString("android package " + p + " what is it safe to disable"));
     }
@@ -1160,20 +1547,43 @@ class App : Form
 
     string AppFlag() { return appFilter.SelectedIndex == 0 ? "-3" : appFilter.SelectedIndex == 1 ? "-s" : appFilter.SelectedIndex == 3 ? "-d" : ""; }
 
+    static string[] GroupTitles { get { return new[] {
+        T("Safe to disable ({n})", "Selamat dilumpuhkan ({n})"), T("Optional apps ({n})", "Aplikasi pilihan ({n})"),
+        T("Be careful ({n})", "Hati-hati ({n})"), T("Installed by you ({n})", "Dipasang oleh awak ({n})"),
+        T("Unknown ({n})", "Tak diketahui ({n})"), T("Background parts: leave them ({n})", "Bahagian latar: biarkan ({n})"),
+        T("Core, protected ({n})", "Teras, dilindungi ({n})") }; } }
+    internal static int GroupOf(string kind)
+    {
+        switch (kind) { case "safe": return 0; case "optional": return 1; case "careful": case "gapps": return 2; case "yours": return 3; case "sysbg": return 5; case "core": return 6; default: return 4; }
+    }
+
     void FillApps()
     {
         string q = appSearch.Text.Trim().ToLower();
-        appList.BeginUpdate(); appList.Items.Clear();
+        var keep = new HashSet<string>(appList.CheckedPkgs());   // ticks survive a search
         int hidden = 0;
+        var items = new List<AppRow>[GroupTitles.Length];
         foreach (var p in appAll)
         {
-            if (q != "" && !p.ToLower().Contains(q)) continue;
-            if (appHideBg.Checked && AppKind(p) == "sysbg") { hidden++; continue; }   // background parts: nothing a user should touch
-            appList.Items.Add(MakeAppItem(p));
+            string kind = AppKind(p), desc = AppDesc(p, kind);
+            if (q != "" && !p.ToLower().Contains(q) && !desc.ToLower().Contains(q)) continue;
+            if (!appShowBg && kind == "sysbg") { hidden++; continue; }   // background parts: nothing a user should touch
+            int gi = GroupOf(kind);
+            if (items[gi] == null) items[gi] = new List<AppRow>();
+            items[gi].Add(new AppRow { Pkg = p, Title = desc != "" ? desc : p, Sub = desc != "" ? p : KindLabel(kind), Locked = kind == "core", Checked = keep.Contains(p),
+                                       Tag = kind == "core" ? T("Protected", "Dilindungi") : kind == "careful" || kind == "gapps" ? T("Careful", "Hati-hati") : null });
         }
-        appList.EndUpdate();
-        appCount.Text = string.Format(T("{0} apps shown", "{0} aplikasi dipaparkan"), appList.Items.Count)
-            + (hidden > 0 ? string.Format(T(" ({0} background parts hidden)", " ({0} bahagian latar disembunyi)"), hidden) : "");
+        var rows = new List<AppRow>();
+        for (int gi = 0; gi < items.Length; gi++)   // grouped by advice: the safest to disable first, protected last
+        {
+            if (items[gi] == null) continue;
+            rows.Add(new AppRow { Head = GroupTitles[gi].Replace("{n}", items[gi].Count.ToString()), Dot = GroupColors[gi] });
+            rows.AddRange(items[gi]);
+        }
+        if (rows.Count == 0 && appAll.Count > 0) appList.Empty = T("No apps match.", "Tiada aplikasi sepadan.");
+        appList.SetRows(rows);
+        appHiddenNote = hidden > 0 ? string.Format(T(" ({0} background parts hidden)", " ({0} bahagian latar disembunyi)"), hidden) : "";
+        UpdateAppBar();
     }
 
     void LoadApps()
@@ -1193,15 +1603,14 @@ class App : Form
             }
             catch (Exception ex) { err = ex.Message; }
             busy = false;
-            Ui(() => { SetEnabled(true); prog.Visible = false; if (pk != null) { appAll = pk; FillApps(); } else { appCount.Text = ""; MessageBox.Show(err, Cap); } });
+            Ui(() => { SetEnabled(true); prog.Visible = false; if (pk != null) { appAll = pk; appLoaded = true; appList.Empty = T("No apps in this list.", "Tiada aplikasi dalam senarai ini."); FillApps(); } else { UpdateAppBar(); MessageBox.Show(err, Cap); } });
         }) { IsBackground = true }.Start();
     }
 
     void UninstallApps()
     {
         if (!NeedSystem()) return;
-        var sel = new List<string>();
-        foreach (ListViewItem it in appList.CheckedItems) sel.Add(it.Text);
+        var sel = appList.CheckedPkgs();
         if (sel.Count == 0) { MessageBox.Show(T("Tick the apps to remove first.", "Tandakan aplikasi yang mahu dibuang dahulu."), Cap); return; }
         var prot = sel.FindAll(IsProtected);
         if (prot.Count > 0)
@@ -1223,12 +1632,14 @@ class App : Form
                 if (o.Contains("Success")) ok++;
                 else { Log(T("Failed: ", "Gagal: ") + p); if (o.Contains("only root")) needRoot = true; }
             }
-            Log(string.Format(T("{0} of {1} removed.", "{0} daripada {1} dibuang."), ok, sel.Count));
-            if (needRoot) Log(T("This phone does not allow removing system apps without root. Use 'Disable ticked apps' instead: it hides and stops the app, and 'Enable ticked apps' brings it back.",
-                                "Telefon ini tak benarkan membuang aplikasi sistem tanpa root. Guna 'Lumpuhkan yang ditanda' sebaliknya: ia menyembunyi dan menghentikan aplikasi, dan 'Hidupkan yang ditanda' memulihkannya."));
+            string res = string.Format(T("{0} of {1} removed.", "{0} daripada {1} dibuang."), ok, sel.Count);
+            Log(res);
+            if (needRoot) Log(T("This phone does not allow removing system apps without root. Use 'Disable' instead: it hides and stops the app, and 'Enable' brings it back.",
+                                "Telefon ini tak benarkan membuang aplikasi sistem tanpa root. Guna 'Lumpuhkan' sebaliknya: ia menyembunyi dan menghentikan aplikasi, dan 'Hidupkan' memulihkannya."));
+            if (needRoot) res += " " + T("System apps need root to remove: use Disable.", "Aplikasi sistem perlu root untuk dibuang: guna Lumpuhkan.");   // the same hint, on the Apps page itself
             var pk = ListPackages(flag);   // refresh the list
-            Ui(() => { appAll = pk; FillApps(); });
-        });
+            Ui(() => { appList.ClearChecks(); appAll = pk; FillApps(); appNote = res; UpdateAppBar(); });   // ticks are cleared after the action
+        }, true);
     }
 
     // the shared core of the Disable / Enable buttons: returns how many packages changed state
@@ -1284,8 +1695,7 @@ class App : Form
     void DisableApps(bool enable)
     {
         if (!NeedSystem()) return;
-        var sel = new List<string>();
-        foreach (ListViewItem it in appList.CheckedItems) sel.Add(it.Text);
+        var sel = appList.CheckedPkgs();
         if (sel.Count == 0) { MessageBox.Show(T("Tick the apps first.", "Tandakan aplikasi dahulu."), Cap); return; }
         if (!enable)
         {
@@ -1296,18 +1706,19 @@ class App : Form
                 return;
             }
             string shown = string.Join("\n", sel.GetRange(0, Math.Min(15, sel.Count)).ToArray()) + (sel.Count > 15 ? "\n..." : "");
-            if (MessageBox.Show(string.Format(T("Disable {0} app(s)?\n\n{1}\n\nThey are hidden and stopped. 'Enable ticked apps' (filter: Disabled apps) brings them back.",
-                                                "Lumpuhkan {0} aplikasi?\n\n{1}\n\nIa disembunyi dan dihentikan. 'Hidupkan yang ditanda' (penapis: Aplikasi dilumpuhkan) memulihkannya."), sel.Count, shown),
+            if (MessageBox.Show(string.Format(T("Disable {0} app(s)?\n\n{1}\n\nThey are hidden and stopped. 'Enable' (on the Disabled tab) brings them back.",
+                                                "Lumpuhkan {0} aplikasi?\n\n{1}\n\nIa disembunyi dan dihentikan. 'Hidupkan' (pada tab Dilumpuhkan) memulihkannya."), sel.Count, shown),
                                 T("Disable apps", "Lumpuhkan aplikasi"), MessageBoxButtons.YesNo, MessageBoxIcon.Warning) != DialogResult.Yes) return;
         }
         string flag = AppFlag();
         Run(enable ? T("Enable apps", "Hidupkan aplikasi") : T("Disable apps", "Lumpuhkan aplikasi"), () =>
         {
             int ok = SetAppsState(sel, enable, true);
-            Log(string.Format(enable ? T("{0} of {1} enabled.", "{0} daripada {1} dihidupkan.") : T("{0} of {1} disabled.", "{0} daripada {1} dilumpuhkan."), ok, sel.Count));
+            string res = string.Format(enable ? T("{0} of {1} enabled.", "{0} daripada {1} dihidupkan.") : T("{0} of {1} disabled.", "{0} daripada {1} dilumpuhkan."), ok, sel.Count);
+            Log(res);
             var pk = ListPackages(flag);   // refresh the list
-            Ui(() => { appAll = pk; FillApps(); });
-        });
+            Ui(() => { appList.ClearChecks(); appAll = pk; FillApps(); appNote = res; UpdateAppBar(); });   // ticks are cleared after the action
+        }, true);
     }
 
     void RestoreApp()
@@ -1327,11 +1738,12 @@ class App : Form
         foreach (var c in old) c.Dispose();
         btnList.RemoveAll(b => b.IsDisposed);
 
-        int bi = brand.SelectedIndex; var p = Prof();
+        int bi = brandIdx; var p = Prof();
         bool xiaomi = bi == 0, samsung = p.Unlock == null, code = p.Code;
         var card = NewCard(unlockPage, string.Format(T("Unlock the bootloader - {0}", "Unlock bootloader - {0}"), p.Name), 0);
         Note(card, T("Unlocking ERASES ALL DATA and can void the warranty. Back up first. Not every phone or carrier variant can be unlocked.",
                      "Unlock MEMADAM SEMUA DATA dan boleh membatalkan waranti. Backup dahulu. Tak semua telefon atau varian pengendali boleh di-unlock."));
+        Note(card, p.Note);   // the brand's own notes (they used to sit in the status card)
         string[] steps;
         if (xiaomi) steps = new[] {
             T("Sign in to a Mi account on the phone and add a phone number (Settings > Mi Account).", "Log masuk akaun Mi pada telefon dan tambah nombor telefon (Settings > Mi Account)."),
@@ -1619,7 +2031,7 @@ class App : Form
 
     void StockPage()
     {
-        int i = brand.SelectedIndex;
+        int i = brandIdx;
         if (i == 0 && codename != "") OpenUrl("https://mirom.ezbox.idv.tw/en/phone/" + codename + "/");
         else if (i == 1) OpenUrl("https://developers.google.com/android/images");
         else MessageBox.Show(i == 0 ? T("Connect the phone once so the codename can be detected.", "Sambung telefon sekali supaya codename dapat dikesan.")
